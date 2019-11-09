@@ -85,21 +85,21 @@ class BertCorpus(object):
         self.test = self.tokenize(os.path.join(path, 'test.txt'))
 
 
-    def tokenize(self, path, default_vocab="bert-base-uncased"):
+    def tokenize(self, path, vocab="bert-base-uncased"):
         """
         :param path: the path of the file
-        :param default_vocab:
+        :param vocab: the name of pretrained bert vovabs we use, by default we will use "bert-base-uncased"
         :return:
         """
         assert os.path.exists(path)
         # Add words to the dictionary
         if not self.bert_tokenizer:
-            self.bert_tokenizer = bert_tokenization.BertTokenizer.from_pretrained(default_vocab)
+            self.bert_tokenizer = bert_tokenization.BertTokenizer.from_pretrained(vocab)
         ids = []
         with open(path, 'r') as f:
             for line in f:
-                sentence = line[:-1] + '<eos>'
-                tokenized_text = self.bert_tokenizer.tokenize(sentence, process_N=True, seperate_punc=True, keep_eos=True)
+                sentence = line[:-1] + '<eos>'  # should we add '<eos>' at the end of each sentence, currently we add <eos> and after bert tokenization, it will be [UNK]
+                tokenized_text = self.bert_tokenizer.tokenize(sentence, process_N=True, seperate_punc=True, keep_eos=True)  # numbers in the text are 'N's, after bert tokenization, they will be '[UNK]'
                 indexed_tokens = self.bert_tokenizer.convert_tokens_to_ids(tokenized_text)
                 ids += indexed_tokens
         return torch.tensor(ids)
