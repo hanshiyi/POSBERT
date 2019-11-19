@@ -135,13 +135,13 @@ def batchify(data, bsz, cuda):
     data = data.view(bsz, -1).t().contiguous()
     if cuda:
         data = data.cuda()
-        print("data.cuda", type(data), data.shape ) #, data)
+    print("data.cuda", type(data), data.shape ) #, data)
     return data
 
 
 if __name__ == '__main__':
     bertCorpus = BertCorpus('data/penn')
     print(bertCorpus.train.shape, bertCorpus.valid.shape, bertCorpus.test.shape)
-    batchify(bertCorpus.train, bsz=20, cuda=True)
-    batchify(bertCorpus.test, bsz=20, cuda=True)
-    batchify(bertCorpus.valid, bsz=20, cuda=True)
+    batchify(bertCorpus.train, bsz=20, cuda=False)
+    batchify(bertCorpus.test, bsz=20, cuda=False)
+    batchify(bertCorpus.valid, bsz=20, cuda=False)
