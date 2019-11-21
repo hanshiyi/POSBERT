@@ -1423,32 +1423,6 @@ def answer_question(context, question, model):
 
 
 if __name__ == "__main__":
-    # train_file = 'data/squad/train-v2.0.json'
-    # version_2_with_negative = True  # The questions may have no answers
-
-    # with open(train_file, "r", encoding='utf-8') as reader:
-    #     input_data = json.load(reader)["data"]
-    # train_examples = read_squad_examples(input_data=input_data, is_training=True,
-    #                                      version_2_with_negative=version_2_with_negative)
-    # print("length of train_examples is ", len(train_examples), ", first element is ", type(train_examples[0]))
-
-    # print("begin to convert train_examples to train_features. It may takes about 10 minutes")
-    # train_features = convert_examples_to_features(
-    #     examples=train_examples,
-    #     tokenizer=BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True),
-    #     max_seq_length=384,
-    #     doc_stride=128,
-    #     max_query_length=64,
-    #     is_training=True)
-    # print("length of train_features is ", len(train_features), ", first element is ", type(train_features[0]))
-
-    # all_input_ids = torch.tensor([f.input_ids for f in train_features], dtype=torch.long)
-    # all_input_mask = torch.tensor([f.input_mask for f in train_features], dtype=torch.long)
-    # all_segment_ids = torch.tensor([f.segment_ids for f in train_features], dtype=torch.long)
-    # all_start_positions = torch.tensor([f.start_position for f in train_features], dtype=torch.long)
-    # all_end_positions = torch.tensor([f.end_position for f in train_features], dtype=torch.long)
-    # train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
-    #                            all_start_positions, all_end_positions)
 
     train_file = 'data/squad/train-v2.0.json'
     version_2_with_negative = True  # The questions may have no answers
