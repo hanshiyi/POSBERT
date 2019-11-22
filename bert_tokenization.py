@@ -90,20 +90,37 @@ class BertTokenizer(object):
                                               never_split=never_split)
         self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab)
         self.max_len = max_len if max_len is not None else int(1e12)
+        self.child_parent = {}
+        self.child_id_parent = {}
 
     def tokenize(self, text, process_N=False, seperate_punc=True, keep_eos=True):
         split_tokens = []
-        for token in self.basic_tokenizer.tokenize(text, process_N, seperate_punc, keep_eos):
+        #TODO:
+        #for token in self.basic_tokenizer.tokenize(text, process_N, seperate_punc, keep_eos):
+        for token in self.basic_tokenizer.tokenize(text):
             # print("tokens:", token)
+            parent_token = token
             for sub_token in self.wordpiece_tokenizer.tokenize(token, keep_eos):
                 split_tokens.append(sub_token)
+                # print("parent: {0}, children: {1}".format(token, sub_token))
+                self.child_parent[sub_token] = parent_token
         return split_tokens
 
     def convert_tokens_to_ids(self, tokens):
         """Converts a sequence of tokens into ids using the vocab."""
         ids = []
         for token in tokens:
-            ids.append(self.vocab[token])
+            id = self.vocab[token]
+            ids.append(id)
+            # if token == '[CLS]':
+            #     print("haha", id)
+            #     exit(0)
+            # Is this right?
+            if token not in self.child_parent:
+                self.child_id_parent[id] = 'UNKNOWN'
+            else:
+                self.child_id_parent[id] = self.child_parent[token]
+
         if len(ids) > self.max_len:
             raise ValueError(
                 "Token indices sequence length is longer than the specified maximum "
@@ -118,6 +135,26 @@ class BertTokenizer(object):
         for i in ids:
             tokens.append(self.ids_to_tokens[i])
         return tokens
+
+    def convert_tokens_to_tags(self, tokens, parent_tags, tag_ids):
+        tags = []
+        for t in tokens:
+            word_parent = self.child_parent.get(t, None)
+            if word_parent is None:
+                raise Exception("cannot find the origin token of token {0}".format(t))
+            tags.append(parent_tags[word_parent])
+        return tags
+
+    def convert_token_ids_to_tag_ids(self, token_ids, parent_tags, tag_ids):
+        ids = []
+        for i in token_ids:
+            word_parent = self.child_id_parent.get(i, None)
+            if word_parent is None:
+                raise Exception("cannot find the origin token of token_id {0}".format(i))
+            # print("parent tags:", len(parent_tags), len(token_ids))
+            # Maybe modify here
+            ids.append(tag_ids.get(parent_tags.get(word_parent, 'NN'), -1))
+        return ids
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name, cache_dir=None, *inputs, **kwargs):
@@ -170,6 +207,7 @@ class BasicTokenizer(object):
         self.do_lower_case = do_lower_case
         self.never_split = never_split
 
+
     def tokenize(self, text, process_N=False, seperate_punc=True, keep_eos=True):
         """Tokenizes a piece of text."""
         text = self._clean_text(text)
@@ -184,25 +222,35 @@ class BasicTokenizer(object):
 
         split_tokens = []
         for token in orig_tokens:
-            #print("token here is", token)
             if self.do_lower_case and token not in self.never_split:
                 token = token.lower()
                 token = self._run_strip_accents(token)
+            split_tokens.extend(self._run_split_on_punc(token))
 
+        output_tokens = whitespace_tokenize(" ".join(split_tokens))
+        return output_tokens
 
-            tokens_to_extend = self._run_split_on_punc(token) if seperate_punc and (token != '<eos>' or not keep_eos) else token.split()
-            #print("tokens to extend", tokens_to_extend)
-            if process_N:
-                tokens_to_extend = list(map(lambda x: x if x.lower() != 'n' else 'unknownN', tokens_to_extend))
-            split_tokens.extend(tokens_to_extend)
+        # TODO: delete or not
+        # for token in orig_tokens:
+        #     #print("token here is", token)
+        #     if self.do_lower_case and token not in self.never_split:
+        #         token = token.lower()
+        #         token = self._run_strip_accents(token)
+        #
+        #
+        #     tokens_to_extend = self._run_split_on_punc(token) if seperate_punc and (token != '<eos>' or not keep_eos) else token.split()
+        #     #print("tokens to extend", tokens_to_extend)
+        #     if process_N:
+        #         tokens_to_extend = list(map(lambda x: x if x.lower() != 'n' else 'unknownN', tokens_to_extend))
+        #     split_tokens.extend(tokens_to_extend)
 
 
         # print("split_tokens", split_tokens)
 
-        output_tokens_str = " ".join(split_tokens)
-        # print("split tokens", output_tokens_str)
-        output_tokens = whitespace_tokenize(output_tokens_str)
-        return output_tokens
+        # output_tokens_str = " ".join(split_tokens)
+        # # print("split tokens", output_tokens_str)
+        # output_tokens = whitespace_tokenize(output_tokens_str)
+        # return output_tokens
 
     def _run_strip_accents(self, text):
         """Strips accents from a piece of text."""
@@ -294,7 +342,7 @@ class WordpieceTokenizer(object):
         self.unk_token = unk_token
         self.max_input_chars_per_word = max_input_chars_per_word
 
-    def tokenize(self, text, keep_eos=True):
+    def tokenize(self, text, keep_eos=False):
         """Tokenizes a piece of text into its word pieces.
 
         This uses a greedy longest-match-first algorithm to perform tokenization
@@ -311,9 +359,10 @@ class WordpieceTokenizer(object):
         Returns:
           A list of wordpiece tokens.
         """
-        if text == '<eos>' and keep_eos :
-            # you can change this if needed
-            return [self.unk_token]
+        # TODO: delete or not
+        # if text == '<eos>' and keep_eos :
+        #     # you can change this if needed
+        #     return [self.unk_token]
 
         output_tokens = []
         for token in whitespace_tokenize(text):
@@ -392,6 +441,7 @@ def _is_punctuation(char):
 if __name__ == '__main__':
     vocab = []
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    sentence = "The price of car is N, which is unaffordable. <eos>"
-    res = tokenizer.tokenize(sentence, process_N=True, seperate_punc=True, keep_eos=True)
-    print(res)
+    sentence = "The price of car is N, which is unaffordable."
+    res = tokenizer.tokenize(sentence)
+    # print(tokenizer.child_parent)
+    print("", res)

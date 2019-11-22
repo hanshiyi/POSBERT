@@ -37,9 +37,11 @@ from tqdm import tqdm, trange
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.optimization import BertAdam, WarmupCosineSchedule
-from pytorch_pretrained_bert.tokenization import (BasicTokenizer,
-                                                  BertTokenizer,
-                                                  whitespace_tokenize)
+# from pytorch_pretrained_bert.tokenization import (BasicTokenizer,
+#                                                   BertTokenizer,
+#                                                   whitespace_tokenize)
+
+from bert_tokenization import (BasicTokenizer, BertTokenizer, whitespace_tokenize)
 
 from modelling import BertForQuestionAnswering
 from lex_parser import Lex_parser
@@ -615,6 +617,244 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
             unique_id += 1
 
     return features
+
+
+def convert_examples_to_features_tags(examples, tokenizer, max_seq_length,
+                                 doc_stride, max_query_length, is_training):
+    """Loads a data file into a list of `InputBatch`s."""
+
+
+    parser = Lex_parser()
+    unique_id = 1000000000
+
+    features = []
+    tags = []
+    for (example_index, example) in enumerate(examples):
+        query_tokens = tokenizer.tokenize(example.question_text)
+
+        # we add here
+
+
+        if len(query_tokens) > max_query_length:
+            query_tokens = query_tokens[0:max_query_length]
+
+        tok_to_orig_index = []
+        orig_to_tok_index = []
+        all_doc_tokens = []
+        for (i, token) in enumerate(example.doc_tokens):
+            orig_to_tok_index.append(len(all_doc_tokens))
+            sub_tokens = tokenizer.tokenize(token)
+
+            for sub_token in sub_tokens:
+                tok_to_orig_index.append(i)
+                all_doc_tokens.append(sub_token)
+
+        tok_start_position = None
+        tok_end_position = None
+        if is_training and example.is_impossible:
+            tok_start_position = -1
+            tok_end_position = -1
+        if is_training and not example.is_impossible:
+            tok_start_position = orig_to_tok_index[example.start_position]
+            if example.end_position < len(example.doc_tokens) - 1:
+                tok_end_position = orig_to_tok_index[example.end_position + 1] - 1
+            else:
+                tok_end_position = len(all_doc_tokens) - 1
+            (tok_start_position, tok_end_position) = _improve_answer_span(
+                all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
+                example.orig_answer_text)
+
+        # The -3 accounts for [CLS], [SEP] and [SEP]
+        max_tokens_for_doc = max_seq_length - len(query_tokens) - 3
+
+        # We can have documents that are longer than the maximum sequence length.
+        # To deal with this we do a sliding window approach, where we take chunks
+        # of the up to our max length with a stride of `doc_stride`.
+        _DocSpan = collections.namedtuple(  # pylint: disable=invalid-name
+            "DocSpan", ["start", "length"])
+        doc_spans = []
+        start_offset = 0
+        while start_offset < len(all_doc_tokens):
+            length = len(all_doc_tokens) - start_offset
+            if length > max_tokens_for_doc:
+                length = max_tokens_for_doc
+            doc_spans.append(_DocSpan(start=start_offset, length=length))
+            if start_offset + length == len(all_doc_tokens):
+                break
+            start_offset += min(length, doc_stride)
+
+        query_text = example.question_text
+        all_doc_context_tokens = example.doc_tokens
+
+        for (doc_span_index, doc_span) in enumerate(doc_spans):
+            tokens = []
+            token_to_orig_map = {}
+            token_is_max_context = {}
+            segment_ids = []
+            tokens.append("[CLS]")
+
+            # We add here
+            query_text = "[CLS] " + query_text + " [SEP]"
+
+            segment_ids.append(0)
+            for token in query_tokens:
+                tokens.append(token)
+                segment_ids.append(0)
+            tokens.append("[SEP]")
+            segment_ids.append(0)
+
+            for i in range(doc_span.length):
+                split_token_index = doc_span.start + i
+                token_to_orig_map[len(tokens)] = tok_to_orig_index[split_token_index]
+
+                is_max_context = _check_is_max_context(doc_spans, doc_span_index,
+                                                       split_token_index)
+                token_is_max_context[len(tokens)] = is_max_context
+                tokens.append(all_doc_tokens[split_token_index])
+                segment_ids.append(1)
+            tokens.append("[SEP]")
+            all_doc_context_tokens.append("[SEP]")
+            segment_ids.append(1)
+
+            parsed_words = dict(parser.convert_sentence_to_tags(query_text))
+            parsed_words_context = dict(parser.convert_sentence_to_tags(all_doc_context_tokens))
+            parsed_words.update(parsed_words_context)
+
+            # print("tokens", tokens)
+            input_ids = tokenizer.convert_tokens_to_ids(tokens)
+
+            input_tags = tokenizer.convert_token_ids_to_tag_ids(input_ids, parsed_words, parser.tag_to_id)
+
+            # The mask has 1 for real tokens and 0 for padding tokens. Only real
+            # tokens are attended to.
+            input_mask = [1] * len(input_ids)
+
+            # Zero-pad up to the sequence length.
+            while len(input_ids) < max_seq_length:
+                input_ids.append(0)
+                input_mask.append(0)
+                segment_ids.append(0)
+                input_tags.append(0)
+
+            assert len(input_ids) == max_seq_length
+            assert len(input_mask) == max_seq_length
+            assert len(segment_ids) == max_seq_length
+            assert len(input_tags) == max_seq_length
+
+            start_position = None
+            end_position = None
+            if is_training and not example.is_impossible:
+                # For training, if our document chunk does not contain an annotation
+                # we throw it out, since there is nothing to predict.
+                doc_start = doc_span.start
+                doc_end = doc_span.start + doc_span.length - 1
+                out_of_span = False
+                if not (tok_start_position >= doc_start and
+                        tok_end_position <= doc_end):
+                    out_of_span = True
+                if out_of_span:
+                    start_position = 0
+                    end_position = 0
+                else:
+                    doc_offset = len(query_tokens) + 2
+                    start_position = tok_start_position - doc_start + doc_offset
+                    end_position = tok_end_position - doc_start + doc_offset
+            if is_training and example.is_impossible:
+                start_position = 0
+                end_position = 0
+            if example_index < 1:
+                logger.info("*** Example ***")
+                logger.info("unique_id: %s" % (unique_id))
+                logger.info("example_index: %s" % (example_index))
+                logger.info("doc_span_index: %s" % (doc_span_index))
+                logger.info("tokens: %s" % " ".join(tokens))
+                logger.info("token_to_orig_map: %s" % " ".join([
+                    "%d:%d" % (x, y) for (x, y) in token_to_orig_map.items()]))
+                logger.info("token_is_max_context: %s" % " ".join([
+                    "%d:%s" % (x, y) for (x, y) in token_is_max_context.items()
+                ]))
+                logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
+                logger.info("input_tags: %s" % " ".join([str(x) for x in input_tags]))
+                logger.info(
+                    "input_mask: %s" % " ".join([str(x) for x in input_mask]))
+                logger.info(
+                    "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+                if is_training and example.is_impossible:
+                    logger.info("impossible example")
+                if is_training and not example.is_impossible:
+                    answer_text = " ".join(tokens[start_position:(end_position + 1)])
+                    logger.info("start_position: %d" % (start_position))
+                    logger.info("end_position: %d" % (end_position))
+                    logger.info(
+                        "answer: %s" % (answer_text))
+
+            features.append(
+                InputFeatures(
+                    unique_id=unique_id,
+                    example_index=example_index,
+                    doc_span_index=doc_span_index,
+                    tokens=tokens,
+                    token_to_orig_map=token_to_orig_map,
+                    token_is_max_context=token_is_max_context,
+                    input_ids=input_ids,
+                    input_mask=input_mask,
+                    segment_ids=segment_ids,
+                    start_position=start_position,
+                    end_position=end_position,
+                    is_impossible=example.is_impossible))
+
+            tags.append(
+                InputTags(
+                    unique_id=unique_id,
+                    example_index=example_index,
+                    doc_span_index=doc_span_index,
+                    tokens=tokens,
+                    token_to_orig_map=token_to_orig_map,
+                    token_is_max_context=token_is_max_context,
+                    input_ids=input_tags,
+                    input_mask=input_mask,
+                    segment_ids=segment_ids,
+                    start_position=start_position,
+                    end_position=end_position,
+                    is_impossible=example.is_impossible))
+            unique_id += 1
+
+    return features, tags
+
+
+
+def convert_json_to_features_and_tags(path, tokenizer, is_training=True, version_2_with_negative=True, max_seq_length=384,
+                                 doc_stride=128, max_query_length=64, store=True):
+    bert_pickle_file = path.replace('.json', "_bert.pickle")
+    lex_pickle_file = path.replace('.json', "_lex.pickle")
+    bert_res, lex_res = None, None
+    if os.path.exists(bert_pickle_file):
+        with open(bert_pickle_file, 'rb') as f:
+            bert_res = pickle.load(f)
+            print(bert_pickle_file, "is already there.")
+
+    if os.path.exists(lex_pickle_file):
+        with open(lex_pickle_file, 'rb') as f:
+            lex_res = pickle.load(f)
+            print(lex_pickle_file, "is already there.")
+
+    if bert_res is not None and lex_res is not None:
+        return bert_res, lex_res
+
+    # print("hehehe", path, is_training, version_2_with_negative, store)
+    # parser = Lex_parser()
+    examples = read_squad_examples_from_json(path, is_training, version_2_with_negative)
+    bert_res, lex_res = convert_examples_to_features_tags(examples, tokenizer, max_seq_length, doc_stride, max_query_length, is_training)
+
+
+    if store:
+        with open(bert_pickle_file, 'wb') as f:
+            pickle.dump(bert_res, f)
+        with open(lex_pickle_file, 'wb') as f:
+            pickle.dump(lex_res, f)
+    return bert_res, lex_res
+
+
 
 
 def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,
@@ -1429,12 +1669,17 @@ if __name__ == "__main__":
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
     lex_parser = Lex_parser()
 
-    features = convert_json_to_features(path=train_file, tokenizer=tokenizer, version_2_with_negative=True)
-    print("bert features", len(features))
-    tags = convert_json_to_tags(path=train_file, lex_parser=lex_parser, version_2_with_negative=True)
-    print("syntax tags", len(tags))
+    # features = convert_json_to_features(path=train_file, tokenizer=tokenizer, version_2_with_negative=True)
+    # print("bert features", len(features))
+    # print(features[0])
+    #
+    # tags = convert_json_to_tags(path=train_file, lex_parser=lex_parser, version_2_with_negative=True)
+    # print("syntax tags", len(tags))
     # print(tags[0].__dict__)
 
+    bert_features, lex_tags = convert_json_to_features_and_tags(path=train_file, tokenizer=tokenizer, version_2_with_negative=True)
+    print("bert features", len(bert_features))
+    print("lex tags", len(lex_tags))
     # all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
     # all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
     # all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
