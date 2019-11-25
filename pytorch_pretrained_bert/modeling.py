@@ -505,6 +505,9 @@ class PreTrainedBertModel(nn.Module):
         config_file = os.path.join(serialization_dir, CONFIG_NAME)
         config = BertConfig.from_json_file(config_file)
         logger.info("Model config {}".format(config))
+        test_config = copy.copy(config)
+        test_config.max_position_embeddings = 128
+        test_config.hidden_size = 256
         # Instantiate model.
         model = cls(config, *inputs, **kwargs)
         weights_path = os.path.join(serialization_dir, WEIGHTS_NAME)
@@ -1141,8 +1144,10 @@ class BertPOSQuestionAnswering(PreTrainedBertModel):
         config = BertConfig.from_json_file(config_file)
         logger.info("Model config {}".format(config))
 
-        pos_config_file = os.path.join(serialization_dir, POS_CONFIG_NAME)
-        pos_config = BertConfig.from_json_file(pos_config_file)
+        pos_config = copy.deepcopy(config)
+        # set pos config
+        pos_config.max_position_embeddings = 128
+        pos_config.hidden_size = 256
         logger.info("Model config {}".format(pos_config))
         # Instantiate model.
         model = cls(config, pos_config, *inputs, **kwargs)
