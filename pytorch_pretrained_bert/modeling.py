@@ -48,6 +48,7 @@ PRETRAINED_MODEL_ARCHIVE_MAP = {
     'bert-base-chinese': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-chinese.tar.gz",
 }
 CONFIG_NAME = 'bert_config.json'
+POS_CONFIG_NAME = 'pos_bert_config.json'
 WEIGHTS_NAME = 'pytorch_model.bin'
 
 
@@ -1047,13 +1048,13 @@ class BertForQuestionAnswering(PreTrainedBertModel):
 
 class BertPOSQuestionAnswering(PreTrainedBertModel):
 
-    def __init__(self, config, posconfig):
+    def __init__(self, config, pos_config):
         super(BertPOSQuestionAnswering, self).__init__(config)
         self.bert = BertModel(config)
-        self.posbert = BertModel(posconfig)
+        self.posbert = BertModel(pos_config)
         # TODO check with Google if it's normal there is no dropout on the token classifier of SQuAD in the TF version
         # self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.qa_outputs = nn.Linear(config.hidden_size+posconfig.hidden_size, 2)
+        self.qa_outputs = nn.Linear(config.hidden_size + pos_config.hidden_size, 2)
         self.apply(self.init_bert_weights)
 
     def forward(self, input_ids, pos_ids, token_type_ids=None, attention_mask=None, start_positions=None, end_positions=None):
@@ -1082,6 +1083,100 @@ class BertPOSQuestionAnswering(PreTrainedBertModel):
             return total_loss
         else:
             return start_logits, end_logits
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name, cache_dir=None, *inputs, **kwargs):
+        """
+        Instantiate a PreTrainedBertModel from a pre-trained model file.
+        Download and cache the pre-trained model file if needed.
+
+        Params:
+            pretrained_model_name: either:
+                - a str with the name of a pre-trained model to load selected in the list of:
+                    . `bert-base-uncased`
+                    . `bert-large-uncased`
+                    . `bert-base-cased`
+                    . `bert-base-multilingual`
+                    . `bert-base-chinese`
+                - a path or url to a pretrained model archive containing:
+                    . `bert_config.json` a configuration file for the model
+                    . `pytorch_model.bin` a PyTorch dump of a BertForPreTraining instance
+            *inputs, **kwargs: additional input for the specific Bert class
+                (ex: num_labels for BertForSequenceClassification)
+        """
+        if pretrained_model_name in PRETRAINED_MODEL_ARCHIVE_MAP:
+            archive_file = PRETRAINED_MODEL_ARCHIVE_MAP[pretrained_model_name]
+        else:
+            archive_file = pretrained_model_name
+        # redirect to the cache, if necessary
+        try:
+            resolved_archive_file = cached_path(archive_file, cache_dir=cache_dir)
+        except FileNotFoundError:
+            logger.error(
+                "Model name '{}' was not found in model name list ({}). "
+                "We assumed '{}' was a path or url but couldn't find any file "
+                "associated to this path or url.".format(
+                    pretrained_model_name,
+                    ', '.join(PRETRAINED_MODEL_ARCHIVE_MAP.keys()),
+                    archive_file))
+            return None
+        if resolved_archive_file == archive_file:
+            logger.info("loading archive file {}".format(archive_file))
+        else:
+            logger.info("loading archive file {} from cache at {}".format(
+                archive_file, resolved_archive_file))
+        tempdir = None
+        if os.path.isdir(resolved_archive_file):
+            serialization_dir = resolved_archive_file
+        else:
+            # Extract archive to temp dir
+            tempdir = tempfile.mkdtemp()
+            logger.info("extracting archive file {} to temp dir {}".format(
+                resolved_archive_file, tempdir))
+            with tarfile.open(resolved_archive_file, 'r:gz') as archive:
+                archive.extractall(tempdir)
+            serialization_dir = tempdir
+        # Load config
+        config_file = os.path.join(serialization_dir, CONFIG_NAME)
+        config = BertConfig.from_json_file(config_file)
+        logger.info("Model config {}".format(config))
+
+        pos_config_file = os.path.join(serialization_dir, POS_CONFIG_NAME)
+        pos_config = BertConfig.from_json_file(pos_config_file)
+        logger.info("Model config {}".format(pos_config))
+        # Instantiate model.
+        model = cls(config, pos_config, *inputs, **kwargs)
+        weights_path = os.path.join(serialization_dir, WEIGHTS_NAME)
+        state_dict = torch.load(weights_path)
+
+        missing_keys = []
+        unexpected_keys = []
+        error_msgs = []
+        # copy state_dict so _load_from_state_dict can modify it
+        metadata = getattr(state_dict, '_metadata', None)
+        state_dict = state_dict.copy()
+        if metadata is not None:
+            state_dict._metadata = metadata
+
+        def load(module, prefix=''):
+            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            module._load_from_state_dict(
+                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
+            for name, child in module._modules.items():
+                if child is not None:
+                    load(child, prefix + name + '.')
+
+        load(model, prefix='' if hasattr(model, 'bert') else 'bert.')
+        if len(missing_keys) > 0:
+            logger.info("Weights of {} not initialized from pretrained model: {}".format(
+                model.__class__.__name__, missing_keys))
+        if len(unexpected_keys) > 0:
+            logger.info("Weights from pretrained model not used in {}: {}".format(
+                model.__class__.__name__, unexpected_keys))
+        if tempdir:
+            # Clean up temp dir
+            shutil.rmtree(tempdir)
+        return model
 
 
 if __name__ == "__main__":
