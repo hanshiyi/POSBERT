@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
+# Copyright 2018 The Google AI Language Team Authors and The HugginFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,45 +15,33 @@
 # limitations under the License.
 """Run BERT on SQuAD."""
 
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import argparse
 import collections
-import json
 import logging
+import json
 import math
 import os
 import random
-import sys
-from io import open
+import pickle
+from tqdm import tqdm, trange
 
 import numpy as np
 import torch
-from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
-                              TensorDataset)
+from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
-from tqdm import tqdm, trange
 
+from pytorch_pretrained_bert.tokenization import whitespace_tokenize, BasicTokenizer, BertTokenizer
+from pytorch_pretrained_bert.modeling import BertForQuestionAnswering
+from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
-from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NAME
-from pytorch_pretrained_bert.optimization import BertAdam #, WarmupCosineSchedule
-# from pytorch_pretrained_bert.tokenization import (BasicTokenizer,
-#                                                   BertTokenizer,
-#                                                   whitespace_tokenize)
 
-from bert_tokenization import (BasicTokenizer, BertTokenizer, whitespace_tokenize)
-
-from modelling import BertForQuestionAnswering
-from lex_parser import Lex_parser
-
-if sys.version_info[0] == 2:
-    import cPickle as pickle
-else:
-    import pickle
-
-logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt = '%m/%d/%Y %H:%M:%S',
-                    level = logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt='%m/%d/%Y %H:%M:%S',
+                    level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -127,260 +115,11 @@ class InputFeatures(object):
         self.is_impossible = is_impossible
 
 
-class InputTags:
-    def __init__(self,
-                 unique_id,
-                 example_index,
-                 doc_span_index,
-                 tokens,
-                 token_to_orig_map,
-                 token_is_max_context,
-                 input_ids,
-                 input_mask,
-                 segment_ids,
-                 start_position=None,
-                 end_position=None,
-                 is_impossible=None):
-        self.unique_id = unique_id
-        self.example_index = example_index
-        self.doc_span_index = doc_span_index
-        self.tokens = tokens
-        self.token_to_orig_map = token_to_orig_map
-        self.token_is_max_context = token_is_max_context
-        self.input_ids = input_ids
-        self.input_mask = input_mask
-        self.segment_ids = segment_ids
-        self.start_position = start_position
-        self.end_position = end_position
-        self.is_impossible = is_impossible
-
-def convert_json_to_features(path, tokenizer, is_training=True, version_2_with_negative=True, max_seq_length=384,
-                                 doc_stride=128, max_query_length=64, store=True):
-    pickle_file = path.replace('.json', "_bert.pickle")
-    if os.path.exists(pickle_file):
-        with open(pickle_file, 'rb') as f:
-            res = pickle.load(f)
-            print(pickle_file, "is already there.", type(res))
-            return res
-
-    # print("hehehe", path, is_training, version_2_with_negative, store)
-    examples = read_squad_examples_from_json(path, is_training, version_2_with_negative)
-    features = convert_examples_to_features(examples, tokenizer, max_seq_length, doc_stride, max_query_length, is_training)
-
-    if store:
-        with open(pickle_file, 'wb') as f:
-            pickle.dump(features, f)
-    return features
-
-
-def convert_json_to_tags(path, lex_parser, is_training=True, version_2_with_negative=True, max_seq_length=384,
-                                 doc_stride=128, max_query_length=64, store=True):
-    pickle_file = path.replace('.json', "_lex.pickle")
-    if os.path.exists(pickle_file):
-        with open(pickle_file, 'rb') as f:
-            res = pickle.load(f)
-            print(pickle_file, "is already there.", type(res))
-            return res
-
-    examples = read_squad_examples_from_json(path, is_training, version_2_with_negative)
-    tags = convert_examples_to_tags(examples, lex_parser, max_seq_length, doc_stride, max_query_length, is_training)
-
-    if store:
-        with open(pickle_file, 'wb') as f:
-            pickle.dump(tags, f)
-    return tags
-
-def convert_examples_to_tags(examples, lex_parser, max_seq_length, doc_stride, max_query_length, is_training):
-    tags = []
-    # print("tags is here", tags)
-
-    unique_id = 1000000000
-    for (example_index, example) in enumerate(examples):
-        # query_tokens = lex_parser.convert_sentence_to_tags(example.question_text)
-        query_tokens =  lex_parser.tokenize(example.question_text) # lex_parser.convert_sentence_to_tags(example.question_text) # tokenizer.tokenize(example.question_text)
-
-        if len(query_tokens) > max_query_length:
-            query_tokens = query_tokens[0:max_query_length]
-
-        tok_to_orig_index = []
-        orig_to_tok_index = []
-        all_doc_tokens = []
-        for (i, token) in enumerate(example.doc_tokens):
-            orig_to_tok_index.append(len(all_doc_tokens))
-            # sub_tokens = lex_parser.convert_sentence_to_tags(token)
-            sub_tokens = lex_parser.tokenize(token)
-            for sub_token in sub_tokens:
-                tok_to_orig_index.append(i)
-                all_doc_tokens.append(sub_token)
-
-        tok_start_position = None
-        tok_end_position = None
-        if is_training and example.is_impossible:
-            tok_start_position = -1
-            tok_end_position = -1
-        if is_training and not example.is_impossible:
-            tok_start_position = orig_to_tok_index[example.start_position]
-            if example.end_position < len(example.doc_tokens) - 1:
-                tok_end_position = orig_to_tok_index[example.end_position + 1] - 1
-            else:
-                tok_end_position = len(all_doc_tokens) - 1
-            (tok_start_position, tok_end_position) = _improve_answer_span(
-                all_doc_tokens, tok_start_position, tok_end_position, lex_parser,
-                example.orig_answer_text)
-
-        # The -3 accounts for [CLS], [SEP] and [SEP]
-        max_tokens_for_doc = max_seq_length - len(query_tokens) - 3
-
-        # We can have documents that are longer than the maximum sequence length.
-        # To deal with this we do a sliding window approach, where we take chunks
-        # of the up to our max length with a stride of `doc_stride`.
-        _DocSpan = collections.namedtuple(  # pylint: disable=invalid-name
-            "DocSpan", ["start", "length"])
-        doc_spans = []
-        start_offset = 0
-        while start_offset < len(all_doc_tokens):
-            length = len(all_doc_tokens) - start_offset
-            if length > max_tokens_for_doc:
-                length = max_tokens_for_doc
-            doc_spans.append(_DocSpan(start=start_offset, length=length))
-            if start_offset + length == len(all_doc_tokens):
-                break
-            start_offset += min(length, doc_stride)
-
-        for (doc_span_index, doc_span) in enumerate(doc_spans):
-            tokens = []
-            token_to_orig_map = {}
-            token_is_max_context = {}
-            segment_ids = []
-            tokens.append("CLS")
-            segment_ids.append(0)
-            for token in query_tokens:
-                tokens.append(token)
-                segment_ids.append(0)
-            tokens.append("SEP")
-            segment_ids.append(0)
-
-            for i in range(doc_span.length):
-                split_token_index = doc_span.start + i
-                token_to_orig_map[len(tokens)] = tok_to_orig_index[split_token_index]
-
-                is_max_context = _check_is_max_context(doc_spans, doc_span_index,
-                                                       split_token_index)
-                token_is_max_context[len(tokens)] = is_max_context
-                tokens.append(all_doc_tokens[split_token_index])
-                segment_ids.append(1)
-            tokens.append("SEP")
-            segment_ids.append(1)
-
-            # print(len(segment_ids), len(tokens))
-            # input_ids = lex_parser.convert_tags_to_ids(tags)
-            input_ids = lex_parser.convert_sentence_to_ids(tokens)
-
-            # The mask has 1 for real tokens and 0 for padding tokens. Only real
-            # tokens are attended to.
-            input_mask = [1] * len(input_ids)
-
-            # print(len(tokens), len(input_ids), len(input_mask), len(segment_ids), max_seq_length)
-            min_len = min(max_seq_length, min(len(input_ids), len(segment_ids)))
-            input_ids, input_mask, segment_ids = input_ids[:min_len], input_mask[:min_len], segment_ids[:min_len]
-
-            # Zero-pad up to the sequence length.
-            while len(input_ids) < max_seq_length:
-                input_ids.append(0)
-                input_mask.append(0)
-                segment_ids.append(0)
-
-
-            assert len(input_ids) == max_seq_length
-            assert len(input_mask) == max_seq_length
-            assert len(segment_ids) == max_seq_length
-
-            start_position = None
-            end_position = None
-            if is_training and not example.is_impossible:
-                # For training, if our document chunk does not contain an annotation
-                # we throw it out, since there is nothing to predict.
-                doc_start = doc_span.start
-                doc_end = doc_span.start + doc_span.length - 1
-                out_of_span = False
-                if not (tok_start_position >= doc_start and
-                        tok_end_position <= doc_end):
-                    out_of_span = True
-                if out_of_span:
-                    start_position = 0
-                    end_position = 0
-                else:
-                    doc_offset = len(query_tokens) + 2
-                    start_position = tok_start_position - doc_start + doc_offset
-                    end_position = tok_end_position - doc_start + doc_offset
-            if is_training and example.is_impossible:
-                start_position = 0
-                end_position = 0
-            if example_index < 0:
-                logger.info("*** Example ***")
-                logger.info("unique_id: %s" % (unique_id))
-                logger.info("example_index: %s" % (example_index))
-                logger.info("doc_span_index: %s" % (doc_span_index))
-                logger.info("tokens: %s" % " ".join(tokens))
-                logger.info("token_to_orig_map: %s" % " ".join([
-                    "%d:%d" % (x, y) for (x, y) in token_to_orig_map.items()]))
-                logger.info("token_is_max_context: %s" % " ".join([
-                    "%d:%s" % (x, y) for (x, y) in token_is_max_context.items()
-                ]))
-                logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-                logger.info(
-                    "input_mask: %s" % " ".join([str(x) for x in input_mask]))
-                logger.info(
-                    "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-                if is_training and example.is_impossible:
-                    logger.info("impossible example")
-                if is_training and not example.is_impossible:
-                    answer_text = " ".join(tokens[start_position:(end_position + 1)])
-                    logger.info("start_position: %d" % (start_position))
-                    logger.info("end_position: %d" % (end_position))
-                    logger.info(
-                        "answer: %s" % (answer_text))
-
-            tags.append(
-                InputTags(
-                    unique_id=unique_id,
-                    example_index=example_index,
-                    doc_span_index=doc_span_index,
-                    tokens=tokens,
-                    token_to_orig_map=token_to_orig_map,
-                    token_is_max_context=token_is_max_context,
-                    input_ids=input_ids,
-                    input_mask=input_mask,
-                    segment_ids=segment_ids,
-                    start_position=start_position,
-                    end_position=end_position,
-                    is_impossible=example.is_impossible))
-            unique_id += 1
-
-    return tags
-
-
-
-def read_squad_examples_from_json(path, is_training, version_2_with_negative, store=True):
-    pickle_file = path.replace('.json', "_text.pickle")
-    if os.path.exists(pickle_file):
-        with open(pickle_file, 'rb') as f:
-            res = pickle.load(f)
-            print(pickle_file, "is already there.", type(res))
-            return res
-
-    with open(path, "r", encoding='utf-8') as reader:
+def read_squad_examples(input_file, is_training, version_2_with_negative):
+    """Read a SQuAD json file into a list of SquadExample."""
+    with open(input_file, "r", encoding='utf-8') as reader:
         input_data = json.load(reader)["data"]
-    examples = read_squad_examples(input_data=input_data, is_training=is_training, version_2_with_negative=version_2_with_negative)
 
-    if store:
-        with open(pickle_file, 'wb') as f:
-            pickle.dump(examples, f)
-    return examples
-
-
-def read_squad_examples(input_data, is_training, version_2_with_negative):
-    """Read a SQuAD input data into a list of SquadExample."""
     def is_whitespace(c):
         if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
             return True
@@ -458,8 +197,6 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
                                  doc_stride, max_query_length, is_training):
     """Loads a data file into a list of `InputBatch`s."""
 
-
-
     unique_id = 1000000000
 
     features = []
@@ -575,7 +312,7 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
             if is_training and example.is_impossible:
                 start_position = 0
                 end_position = 0
-            if example_index < 0:
+            if example_index < 20:
                 logger.info("*** Example ***")
                 logger.info("unique_id: %s" % (unique_id))
                 logger.info("example_index: %s" % (example_index))
@@ -617,246 +354,6 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
             unique_id += 1
 
     return features
-
-
-def convert_examples_to_features_tags(examples, tokenizer, max_seq_length,
-                                 doc_stride, max_query_length, is_training):
-    """Loads a data file into a list of `InputBatch`s."""
-
-
-    parser = Lex_parser()
-    unique_id = 1000000000
-
-    features = []
-    tags = []
-    for (example_index, example) in enumerate(examples):
-        query_tokens = tokenizer.tokenize(example.question_text)
-
-        # we add here
-
-
-        if len(query_tokens) > max_query_length:
-            query_tokens = query_tokens[0:max_query_length]
-
-        tok_to_orig_index = []
-        orig_to_tok_index = []
-        all_doc_tokens = []
-        for (i, token) in enumerate(example.doc_tokens):
-            orig_to_tok_index.append(len(all_doc_tokens))
-            sub_tokens = tokenizer.tokenize(token)
-
-            for sub_token in sub_tokens:
-                tok_to_orig_index.append(i)
-                all_doc_tokens.append(sub_token)
-
-        tok_start_position = None
-        tok_end_position = None
-        if is_training and example.is_impossible:
-            tok_start_position = -1
-            tok_end_position = -1
-        if is_training and not example.is_impossible:
-            tok_start_position = orig_to_tok_index[example.start_position]
-            if example.end_position < len(example.doc_tokens) - 1:
-                tok_end_position = orig_to_tok_index[example.end_position + 1] - 1
-            else:
-                tok_end_position = len(all_doc_tokens) - 1
-            (tok_start_position, tok_end_position) = _improve_answer_span(
-                all_doc_tokens, tok_start_position, tok_end_position, tokenizer,
-                example.orig_answer_text)
-
-        # The -3 accounts for [CLS], [SEP] and [SEP]
-        max_tokens_for_doc = max_seq_length - len(query_tokens) - 3
-
-        # We can have documents that are longer than the maximum sequence length.
-        # To deal with this we do a sliding window approach, where we take chunks
-        # of the up to our max length with a stride of `doc_stride`.
-        _DocSpan = collections.namedtuple(  # pylint: disable=invalid-name
-            "DocSpan", ["start", "length"])
-        doc_spans = []
-        start_offset = 0
-        while start_offset < len(all_doc_tokens):
-            length = len(all_doc_tokens) - start_offset
-            if length > max_tokens_for_doc:
-                length = max_tokens_for_doc
-            doc_spans.append(_DocSpan(start=start_offset, length=length))
-            if start_offset + length == len(all_doc_tokens):
-                break
-            start_offset += min(length, doc_stride)
-
-        query_text = example.question_text
-        all_doc_context_tokens = example.doc_tokens
-
-        for (doc_span_index, doc_span) in enumerate(doc_spans):
-            tokens = []
-            token_to_orig_map = {}
-            token_is_max_context = {}
-            segment_ids = []
-            tokens.append("[CLS]")
-
-            # We add here
-            query_text = "[CLS] " + query_text + " [SEP]"
-
-            segment_ids.append(0)
-            for token in query_tokens:
-                tokens.append(token)
-                segment_ids.append(0)
-            tokens.append("[SEP]")
-            segment_ids.append(0)
-
-            for i in range(doc_span.length):
-                split_token_index = doc_span.start + i
-                token_to_orig_map[len(tokens)] = tok_to_orig_index[split_token_index]
-
-                is_max_context = _check_is_max_context(doc_spans, doc_span_index,
-                                                       split_token_index)
-                token_is_max_context[len(tokens)] = is_max_context
-                tokens.append(all_doc_tokens[split_token_index])
-                segment_ids.append(1)
-            tokens.append("[SEP]")
-            all_doc_context_tokens.append("[SEP]")
-            segment_ids.append(1)
-
-            parsed_words = dict(parser.convert_sentence_to_tags(query_text))
-            parsed_words_context = dict(parser.convert_sentence_to_tags(all_doc_context_tokens))
-            parsed_words.update(parsed_words_context)
-
-            # print("tokens", tokens)
-            input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-            input_tags = tokenizer.convert_token_ids_to_tag_ids(input_ids, parsed_words, parser.tag_to_id)
-
-            # The mask has 1 for real tokens and 0 for padding tokens. Only real
-            # tokens are attended to.
-            input_mask = [1] * len(input_ids)
-
-            # Zero-pad up to the sequence length.
-            while len(input_ids) < max_seq_length:
-                input_ids.append(0)
-                input_mask.append(0)
-                segment_ids.append(0)
-                input_tags.append(0)
-
-            assert len(input_ids) == max_seq_length
-            assert len(input_mask) == max_seq_length
-            assert len(segment_ids) == max_seq_length
-            assert len(input_tags) == max_seq_length
-
-            start_position = None
-            end_position = None
-            if is_training and not example.is_impossible:
-                # For training, if our document chunk does not contain an annotation
-                # we throw it out, since there is nothing to predict.
-                doc_start = doc_span.start
-                doc_end = doc_span.start + doc_span.length - 1
-                out_of_span = False
-                if not (tok_start_position >= doc_start and
-                        tok_end_position <= doc_end):
-                    out_of_span = True
-                if out_of_span:
-                    start_position = 0
-                    end_position = 0
-                else:
-                    doc_offset = len(query_tokens) + 2
-                    start_position = tok_start_position - doc_start + doc_offset
-                    end_position = tok_end_position - doc_start + doc_offset
-            if is_training and example.is_impossible:
-                start_position = 0
-                end_position = 0
-            if example_index < 1:
-                logger.info("*** Example ***")
-                logger.info("unique_id: %s" % (unique_id))
-                logger.info("example_index: %s" % (example_index))
-                logger.info("doc_span_index: %s" % (doc_span_index))
-                logger.info("tokens: %s" % " ".join(tokens))
-                logger.info("token_to_orig_map: %s" % " ".join([
-                    "%d:%d" % (x, y) for (x, y) in token_to_orig_map.items()]))
-                logger.info("token_is_max_context: %s" % " ".join([
-                    "%d:%s" % (x, y) for (x, y) in token_is_max_context.items()
-                ]))
-                logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-                logger.info("input_tags: %s" % " ".join([str(x) for x in input_tags]))
-                logger.info(
-                    "input_mask: %s" % " ".join([str(x) for x in input_mask]))
-                logger.info(
-                    "segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-                if is_training and example.is_impossible:
-                    logger.info("impossible example")
-                if is_training and not example.is_impossible:
-                    answer_text = " ".join(tokens[start_position:(end_position + 1)])
-                    logger.info("start_position: %d" % (start_position))
-                    logger.info("end_position: %d" % (end_position))
-                    logger.info(
-                        "answer: %s" % (answer_text))
-
-            features.append(
-                InputFeatures(
-                    unique_id=unique_id,
-                    example_index=example_index,
-                    doc_span_index=doc_span_index,
-                    tokens=tokens,
-                    token_to_orig_map=token_to_orig_map,
-                    token_is_max_context=token_is_max_context,
-                    input_ids=input_ids,
-                    input_mask=input_mask,
-                    segment_ids=segment_ids,
-                    start_position=start_position,
-                    end_position=end_position,
-                    is_impossible=example.is_impossible))
-
-            tags.append(
-                InputTags(
-                    unique_id=unique_id,
-                    example_index=example_index,
-                    doc_span_index=doc_span_index,
-                    tokens=tokens,
-                    token_to_orig_map=token_to_orig_map,
-                    token_is_max_context=token_is_max_context,
-                    # ????
-                    input_ids=input_tags,
-                    input_mask=input_mask,
-                    segment_ids=segment_ids,
-                    start_position=start_position,
-                    end_position=end_position,
-                    is_impossible=example.is_impossible))
-            unique_id += 1
-
-    return features, tags
-
-
-
-def convert_json_to_features_and_tags(path, tokenizer, is_training=True, version_2_with_negative=True, max_seq_length=384,
-                                 doc_stride=128, max_query_length=64, store=True):
-    bert_pickle_file = path.replace('.json', "_bert.pickle")
-    lex_pickle_file = path.replace('.json', "_lex.pickle")
-    bert_res, lex_res = None, None
-    print(bert_pickle_file, lex_pickle_file)
-    if os.path.exists(bert_pickle_file):
-        with open(bert_pickle_file, 'rb') as f:
-            bert_res = pickle.load(f)
-            print(bert_pickle_file, "is already there.")
-
-    if os.path.exists(lex_pickle_file):
-        with open(lex_pickle_file, 'rb') as f:
-            lex_res = pickle.load(f)
-            print(lex_pickle_file, "is already there.")
-
-    if bert_res is not None and lex_res is not None:
-        return bert_res, lex_res
-
-    # print("hehehe", path, is_training, version_2_with_negative, store)
-    # parser = Lex_parser()
-    examples = read_squad_examples_from_json(path, is_training, version_2_with_negative)
-    bert_res, lex_res = convert_examples_to_features_tags(examples, tokenizer, max_seq_length, doc_stride, max_query_length, is_training)
-
-
-    if store:
-        with open(bert_pickle_file, 'wb') as f:
-            pickle.dump(bert_res, f)
-        with open(lex_pickle_file, 'wb') as f:
-            pickle.dump(lex_res, f)
-    return bert_res, lex_res
-
-
 
 
 def _improve_answer_span(doc_tokens, input_start, input_end, tokenizer,
@@ -937,9 +434,14 @@ RawResult = collections.namedtuple("RawResult",
                                    ["unique_id", "start_logits", "end_logits"])
 
 
-def parse_predictions(all_examples, all_features, all_results, n_best_size,
-                      max_answer_length, do_lower_case, verbose_logging,
+def write_predictions(all_examples, all_features, all_results, n_best_size,
+                      max_answer_length, do_lower_case, output_prediction_file,
+                      output_nbest_file, output_null_log_odds_file, verbose_logging,
                       version_2_with_negative, null_score_diff_threshold):
+    """Write final predictions to the json file and log-odds of null if needed."""
+    logger.info("Writing predictions to: %s" % (output_prediction_file))
+    logger.info("Writing nbest to: %s" % (output_nbest_file))
+
     example_index_to_features = collections.defaultdict(list)
     for feature in all_features:
         example_index_to_features[feature.example_index].append(feature)
@@ -1064,13 +566,15 @@ def parse_predictions(all_examples, all_features, all_results, n_best_size,
                         text="",
                         start_logit=null_start_logit,
                         end_logit=null_end_logit))
-                
+
             # In very rare edge cases we could only have single null prediction.
             # So we just create a nonce prediction in this case to avoid failure.
-            if len(nbest)==1:
-                nbest.insert(0,
-                    _NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0))
-                
+            if len(nbest) == 1:
+                nbest.insert(
+                    0,
+                    _NbestPrediction(text="empty", start_logit=0.0, end_logit=0.0)
+                )
+
         # In very rare edge cases we could have no valid predictions. So we
         # just create a nonce prediction in this case to avoid failure.
         if not nbest:
@@ -1112,16 +616,6 @@ def parse_predictions(all_examples, all_features, all_results, n_best_size,
             else:
                 all_predictions[example.qas_id] = best_non_null_entry.text
                 all_nbest_json[example.qas_id] = nbest_json
-
-    return all_predictions, all_nbest_json, scores_diff_json
-
-
-def write_predictions(all_predictions, all_nbest_json, scores_diff_json, output_prediction_file,
-                      output_nbest_file, output_null_log_odds_file, version_2_with_negative):
-    """Write final predictions to the json file and log-odds of null if needed."""
-
-    logger.info("Writing predictions to: %s" % (output_prediction_file))
-    logger.info("Writing nbest to: %s" % (output_nbest_file))
 
     with open(output_prediction_file, "w") as writer:
         writer.write(json.dumps(all_predictions, indent=4) + "\n")
@@ -1265,19 +759,20 @@ def _compute_softmax(scores):
     return probs
 
 
-def create_argument_parser():
+def main():
     parser = argparse.ArgumentParser()
 
-    ## Required parameters
+    # Required parameters
     parser.add_argument("--bert_model", default=None, type=str, required=True,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
                         "bert-large-uncased, bert-base-cased, bert-large-cased, bert-base-multilingual-uncased, "
                         "bert-base-multilingual-cased, bert-base-chinese.")
-
-    ## Other parameters
-    parser.add_argument("--output_dir", default=None, type=str,
+    parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model checkpoints and predictions will be written.")
-    parser.add_argument("--train_file", default=None, type=str, help="SQuAD json for training. E.g., train-v1.1.json")
+
+    # Other parameters
+    parser.add_argument("--train_file", default=None, type=str,
+                        help="SQuAD json for training. E.g., train-v1.1.json")
     parser.add_argument("--predict_file", default=None, type=str,
                         help="SQuAD json for predictions. E.g., dev-v1.1.json or test-v1.1.json")
     parser.add_argument("--max_seq_length", default=384, type=int,
@@ -1291,8 +786,10 @@ def create_argument_parser():
     parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
     parser.add_argument("--do_predict", action='store_true', help="Whether to run eval on the dev set.")
     parser.add_argument("--train_batch_size", default=32, type=int, help="Total batch size for training.")
-    parser.add_argument("--predict_batch_size", default=8, type=int, help="Total batch size for predictions.")
-    parser.add_argument("--learning_rate", default=5e-5, type=float, help="The initial learning rate for Adam.")
+    parser.add_argument("--predict_batch_size", default=8, type=int,
+                        help="Total batch size for predictions.")
+    parser.add_argument("--learning_rate", default=5e-5, type=float,
+                        help="The initial learning rate for Adam.")
     parser.add_argument("--num_train_epochs", default=3.0, type=float,
                         help="Total number of training epochs to perform.")
     parser.add_argument("--warmup_proportion", default=0.1, type=float,
@@ -1333,16 +830,23 @@ def create_argument_parser():
                         help="Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
                              "0 (default value): dynamic loss scaling.\n"
                              "Positive power of 2: static loss scaling value.\n")
+    parser.add_argument('--theta',
+                        type=int, default=10,
+                        help="theta in loss func")
+    parser.add_argument('--alpha',
+                        type=float, default=2,
+                        help="alpha in loss func")
+    parser.add_argument('--beta',
+                        type=int, default=4,
+                        help="beta in loss func")
     parser.add_argument('--version_2_with_negative',
                         action='store_true',
                         help='If true, the SQuAD examples contain some that do not have an answer.')
     parser.add_argument('--null_score_diff_threshold',
                         type=float, default=0.0,
                         help="If null_score - best_non_null is greater than the threshold predict null.")
-    return parser
+    args = parser.parse_args()
 
-
-def prepare_model(args):
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
         n_gpu = torch.cuda.device_count()
@@ -1357,7 +861,7 @@ def prepare_model(args):
 
     if args.gradient_accumulation_steps < 1:
         raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
-                            args.gradient_accumulation_steps))
+            args.gradient_accumulation_steps))
 
     args.train_batch_size = args.train_batch_size // args.gradient_accumulation_steps
 
@@ -1374,35 +878,30 @@ def prepare_model(args):
         if not args.train_file:
             raise ValueError(
                 "If `do_train` is True, then `train_file` must be specified.")
+    if args.do_predict:
+        if not args.predict_file:
+            raise ValueError(
+                "If `do_predict` is True, then `predict_file` must be specified.")
 
-    if args.output_dir:
-        if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train:
-            raise ValueError("Output directory () already exists and is not empty.")
-        if not os.path.exists(args.output_dir):
-            os.makedirs(args.output_dir)
+    if os.path.exists(args.output_dir) and os.listdir(args.output_dir) and args.do_train:
+        raise ValueError("Output directory () already exists and is not empty.")
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=args.do_lower_case)
+    tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
 
     train_examples = None
     num_train_optimization_steps = None
     if args.do_train:
-        with open(args.train_file, "r", encoding='utf-8') as reader:
-            input_data = json.load(reader)["data"]
-
-        train_examples = read_squad_examples(input_data=input_data, is_training=True, version_2_with_negative=args.version_2_with_negative)
-
-        num_train_optimization_steps = int(len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) * args.num_train_epochs
+        train_examples = read_squad_examples(
+            input_file=args.train_file, is_training=True, version_2_with_negative=args.version_2_with_negative)
+        num_train_optimization_steps = int(
+            len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) * args.num_train_epochs
         if args.local_rank != -1:
             num_train_optimization_steps = num_train_optimization_steps // torch.distributed.get_world_size()
 
-    map_location = 'cpu' if args.no_cuda else None
-
     # Prepare model
-    model = BertForQuestionAnswering.from_pretrained(
-        pretrained_model_name=args.bert_model,
-        cache_dir=os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank)),
-        map_location=map_location
-    )
+    model = BertForQuestionAnswering.from_pretrained(args.bert_model,
+                                                     cache_dir=PYTORCH_PRETRAINED_BERT_CACHE / 'distributed_{}'.format(args.local_rank))
 
     if args.fp16:
         model.half()
@@ -1411,7 +910,8 @@ def prepare_model(args):
         try:
             from apex.parallel import DistributedDataParallel as DDP
         except ImportError:
-            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
+            raise ImportError(
+                "Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
 
         model = DDP(model)
     elif n_gpu > 1:
@@ -1426,16 +926,18 @@ def prepare_model(args):
 
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+        {'params': [p for n, p in param_optimizer if not any(
+            nd in n for nd in no_decay)], 'weight_decay': 0.01},
         {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-        ]
+    ]
 
     if args.fp16:
         try:
             from apex.optimizers import FP16_Optimizer
             from apex.optimizers import FusedAdam
         except ImportError:
-            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
+            raise ImportError(
+                "Please install apex from https://www.github.com/nvidia/apex to use distributed and fp16 training.")
 
         optimizer = FusedAdam(optimizer_grouped_parameters,
                               lr=args.learning_rate,
@@ -1453,8 +955,9 @@ def prepare_model(args):
 
     global_step = 0
     if args.do_train:
-        cached_train_features_file = args.train_file+'_{0}_{1}_{2}_{3}'.format(
-            list(filter(None, args.bert_model.split('/'))).pop(), str(args.max_seq_length), str(args.doc_stride), str(args.max_query_length))
+        cached_train_features_file = args.train_file + '_{1}_{2}_{3}'.format(
+            args.bert_model, str(args.max_seq_length), str(args.doc_stride), str(args.max_query_length))
+        train_features = None
         try:
             with open(cached_train_features_file, "rb") as reader:
                 train_features = pickle.load(reader)
@@ -1488,15 +991,19 @@ def prepare_model(args):
             train_sampler = DistributedSampler(train_data)
         train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
 
-        model.train()
-        for _ in trange(int(args.num_train_epochs), desc="Epoch"):
+        for epoch in trange(int(args.num_train_epochs), desc="Epoch"):
+            model.train()
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
                 if n_gpu == 1:
-                    batch = tuple(t.to(device) for t in batch) # multi-gpu does scattering it-self
+                    batch = tuple(t.to(device) for t in batch)  # multi-gpu does scattering it-self
                 input_ids, input_mask, segment_ids, start_positions, end_positions = batch
-                loss = model(input_ids, segment_ids, input_mask, start_positions, end_positions)
+                try:
+                    loss = model(input_ids, segment_ids, input_mask, start_positions, end_positions)
+                except Exception as e:
+                    logger.info(str(e))
+                    continue
                 if n_gpu > 1:
-                    loss = loss.mean() # mean() to average on multi-gpu.
+                    loss = loss.mean()  # mean() to average on multi-gpu.
                 if args.gradient_accumulation_steps > 1:
                     loss = loss / args.gradient_accumulation_steps
 
@@ -1508,184 +1015,82 @@ def prepare_model(args):
                     if args.fp16:
                         # modify learning rate with special warm up BERT uses
                         # if args.fp16 is False, BertAdam is used and handles this automatically
-                        lr_this_step = args.learning_rate * WarmupCosineSchedule(global_step/num_train_optimization_steps, args.warmup_proportion)
+                        lr_this_step = args.learning_rate * \
+                            warmup_linear(global_step / num_train_optimization_steps, args.warmup_proportion)
                         for param_group in optimizer.param_groups:
                             param_group['lr'] = lr_this_step
                     optimizer.step()
                     optimizer.zero_grad()
                     global_step += 1
 
-    if args.do_train:
-        # Save a trained model and the associated configuration
-        model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-        output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
-        torch.save(model_to_save.state_dict(), output_model_file)
-        output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
-        with open(output_config_file, 'w') as f:
-            f.write(model_to_save.config.to_json_string())
+                # # Save a trained model
+                # model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
+                # output_model_file = os.path.join(args.output_dir, "pytorch_model_{}.bin".format(epoch))
+                # if args.do_train:
+                #     torch.save(model_to_save.state_dict(), output_model_file)
+                #     # Load a trained model that you have fine-tuned
+                #     model_state_dict = torch.load(output_model_file)
+                #     model = BertForQuestionAnswering.from_pretrained(args.bert_model, state_dict=model_state_dict)
+                # else:
+                #     model = BertForQuestionAnswering.from_pretrained(args.bert_model)
 
-        # Load a trained model and config that you have fine-tuned
-        config = BertConfig(output_config_file)
-        model = BertForQuestionAnswering(config)
-        model.load_state_dict(torch.load(output_model_file))
-    else:
-        model = BertForQuestionAnswering.from_pretrained(
-            pretrained_model_name=args.bert_model,
-            map_location=map_location
-        )
+                # model.to(device)
 
-    model.to(device)
-    return model, tokenizer, device
+            if args.do_predict and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
+                eval_examples = read_squad_examples(
+                    input_file=args.predict_file, is_training=False,
+                    version_2_with_negative=args.version_2_with_negative)
+                eval_features = convert_examples_to_features(
+                    examples=eval_examples,
+                    tokenizer=tokenizer,
+                    max_seq_length=args.max_seq_length,
+                    doc_stride=args.doc_stride,
+                    max_query_length=args.max_query_length,
+                    is_training=False)
 
+                logger.info("***** Running predictions *****")
+                logger.info("  Num orig examples = %d", len(eval_examples))
+                logger.info("  Num split examples = %d", len(eval_features))
+                logger.info("  Batch size = %d", args.predict_batch_size)
 
-def read_squad_examples_from_file(args):
-    if not args.predict_file:
-        raise ValueError('predict_file must be specified to read examples from file')
-    with open(args.predict_file, "r", encoding='utf-8') as reader:
-        input_data = json.load(reader)["data"]
-    return read_squad_examples(
-        input_data=input_data,
-        is_training=False,
-        version_2_with_negative=args.version_2_with_negative
-    )
+                all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
+                all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
+                all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
+                all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
+                eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
+                # Run prediction for full data
+                eval_sampler = SequentialSampler(eval_data)
+                eval_dataloader = DataLoader(eval_data, sampler=eval_sampler,
+                                             batch_size=args.predict_batch_size)
 
-
-def prepare_squad_examples(context, question):
-    """Mimics reading question from SQuAD json given context and answer"""
-    input_data = [
-        {
-            'paragraphs': [
-                {
-                    'context': context,
-                    'qas': [
-                        {
-                            'question': question,
-                            'id': 'answer'
-                        }
-                    ]
-                }
-            ]
-        }
-    ]
-    return read_squad_examples(
-        input_data=input_data,
-        is_training=False,
-        version_2_with_negative=False
-    )
-
-
-def predict(eval_examples, model, tokenizer, device, args):
-    if args.do_predict and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        eval_features = convert_examples_to_features(
-            examples=eval_examples,
-            tokenizer=tokenizer,
-            max_seq_length=args.max_seq_length,
-            doc_stride=args.doc_stride,
-            max_query_length=args.max_query_length,
-            is_training=False)
-
-        logger.info("***** Running predictions *****")
-        logger.info("  Num orig examples = %d", len(eval_examples))
-        logger.info("  Num split examples = %d", len(eval_features))
-        logger.info("  Batch size = %d", args.predict_batch_size)
-
-        all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-        all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-        all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-        all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-        eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_example_index)
-        # Run prediction for full data
-        eval_sampler = SequentialSampler(eval_data)
-        eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.predict_batch_size)
-
-        model.eval()
-        all_results = []
-        logger.info("Start evaluating")
-        for input_ids, input_mask, segment_ids, example_indices in tqdm(eval_dataloader, desc="Evaluating"):
-            if len(all_results) % 1000 == 0:
-                logger.info("Processing example: %d" % (len(all_results)))
-            input_ids = input_ids.to(device)
-            input_mask = input_mask.to(device)
-            segment_ids = segment_ids.to(device)
-            with torch.no_grad():
-                batch_start_logits, batch_end_logits = model(input_ids, segment_ids, input_mask)
-            for i, example_index in enumerate(example_indices):
-                start_logits = batch_start_logits[i].detach().cpu().tolist()
-                end_logits = batch_end_logits[i].detach().cpu().tolist()
-                eval_feature = eval_features[example_index.item()]
-                unique_id = int(eval_feature.unique_id)
-                all_results.append(RawResult(unique_id=unique_id,
-                                             start_logits=start_logits,
-                                             end_logits=end_logits))
-        return parse_predictions(eval_examples, eval_features, all_results, args.n_best_size,
-                                 args.max_answer_length, args.do_lower_case, args.verbose_logging,
-                                 args.version_2_with_negative, args.null_score_diff_threshold)
-    return None
-
-
-def save_predictions(all_predictions, all_nbest_json, scores_diff_json, args):
-    if args.do_predict and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        output_prediction_file = os.path.join(args.output_dir, "predictions.json")
-        output_nbest_file = os.path.join(args.output_dir, "nbest_predictions.json")
-        output_null_log_odds_file = os.path.join(args.output_dir, "null_odds.json")
-        write_predictions(all_predictions, all_nbest_json, scores_diff_json, output_prediction_file,
-                          output_nbest_file, output_null_log_odds_file, args.version_2_with_negative)
-
-
-def load_default_prediction_model():
-    parser = create_argument_parser()
-    args = parser.parse_args([
-        '--bert_model', 'model',
-        '--do_predict',
-        '--do_lower_case',
-        '--no_cuda',
-    ])
-    model, tokenizer, device = prepare_model(args)
-    return {
-        'model': model,
-        'tokenizer': tokenizer,
-        'device': device,
-        'args': args
-    }
-
-
-def answer_question(context, question, model):
-    eval_examples = prepare_squad_examples(context, question)
-    all_predictions, _, _ = predict(eval_examples, **model)
-    return all_predictions['answer']
-
-
-# def main():
-#     parser = create_argument_parser()
-#     args = parser.parse_args()
-#     model, tokenizer, device = prepare_model(args)
-#     eval_examples = read_squad_examples_from_file(args)
-#     all_predictions, all_nbest_json, scores_diff_json = predict(eval_examples, model, tokenizer, device, args)
-#     save_predictions(all_predictions, all_nbest_json, scores_diff_json, args)
+                model.eval()
+                all_results = []
+                logger.info("Start evaluating")
+                for input_ids, input_mask, segment_ids, example_indices in tqdm(eval_dataloader, desc="Evaluating"):
+                    if len(all_results) % 1000 == 0:
+                        logger.info("Processing example: %d" % (len(all_results)))
+                    input_ids = input_ids.to(device)
+                    input_mask = input_mask.to(device)
+                    segment_ids = segment_ids.to(device)
+                    with torch.no_grad():
+                        batch_start_logits, batch_end_logits = model(input_ids, segment_ids, input_mask)
+                    for i, example_index in enumerate(example_indices):
+                        start_logits = batch_start_logits[i].detach().cpu().tolist()
+                        end_logits = batch_end_logits[i].detach().cpu().tolist()
+                        eval_feature = eval_features[example_index.item()]
+                        unique_id = int(eval_feature.unique_id)
+                        all_results.append(RawResult(unique_id=unique_id,
+                                                     start_logits=start_logits,
+                                                     end_logits=end_logits))
+                output_prediction_file = os.path.join(args.output_dir, "predictions_{}.json".format(epoch))
+                output_nbest_file = os.path.join(args.output_dir, "nbest_predictions_{}.json".format(epoch))
+                output_null_log_odds_file = os.path.join(args.output_dir, "null_odds_{}.json".format(epoch))
+                write_predictions(eval_examples, eval_features, all_results,
+                                  args.n_best_size, args.max_answer_length,
+                                  args.do_lower_case, output_prediction_file,
+                                  output_nbest_file, output_null_log_odds_file, args.verbose_logging,
+                                  args.version_2_with_negative, args.null_score_diff_threshold)
 
 
 if __name__ == "__main__":
-
-    train_file = 'data/squad/train-v2.0.json'
-    version_2_with_negative = True  # The questions may have no answers
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-    lex_parser = Lex_parser()
-
-    # features = convert_json_to_features(path=train_file, tokenizer=tokenizer, version_2_with_negative=True)
-    # print("bert features", len(features))
-    # print(features[0])
-    #
-    # tags = convert_json_to_tags(path=train_file, lex_parser=lex_parser, version_2_with_negative=True)
-    # print("syntax tags", len(tags))
-    # print(tags[0].__dict__)
-
-    bert_features, lex_tags = convert_json_to_features_and_tags(path=train_file, tokenizer=tokenizer, version_2_with_negative=True)
-    print("bert features", len(bert_features))
-    print("lex tags", len(lex_tags))
-    # all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-    # all_input_mask = torch.tensor([f.input_mask for f in features], dtype=torch.long)
-    # all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
-    # all_start_positions = torch.tensor([f.start_position for f in features], dtype=torch.long)
-    # all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)
-    # train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
-    #                            all_start_positions, all_end_positions)
+    main()

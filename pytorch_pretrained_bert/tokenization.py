@@ -25,9 +25,6 @@ import logging
 
 from .file_utils import cached_path
 
-logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s', 
-                    datefmt = '%m/%d/%Y %H:%M:%S',
-                    level = logging.INFO)
 logger = logging.getLogger(__name__)
 
 PRETRAINED_VOCAB_ARCHIVE_MAP = {
@@ -38,6 +35,15 @@ PRETRAINED_VOCAB_ARCHIVE_MAP = {
     'bert-base-multilingual-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-uncased-vocab.txt",
     'bert-base-multilingual-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-cased-vocab.txt",
     'bert-base-chinese': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-chinese-vocab.txt",
+}
+PRETRAINED_VOCAB_POSITIONAL_EMBEDDINGS_SIZE_MAP = {
+    'bert-base-uncased': 512,
+    'bert-large-uncased': 512,
+    'bert-base-cased': 512,
+    'bert-large-cased': 512,
+    'bert-base-multilingual-uncased': 512,
+    'bert-base-multilingual-cased': 512,
+    'bert-base-chinese': 512,
 }
 VOCAB_NAME = 'vocab.txt'
 
@@ -68,7 +74,9 @@ def whitespace_tokenize(text):
 
 class BertTokenizer(object):
     """Runs end-to-end tokenization: punctuation splitting + wordpiece"""
-    def __init__(self, vocab_file, do_lower_case=True):
+
+    def __init__(self, vocab_file, do_lower_case=True, max_len=None,
+                 never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]")):
         if not os.path.isfile(vocab_file):
             raise ValueError(
                 "Can't find a vocabulary file at path '{}'. To load the vocabulary from a Google pretrained "
@@ -76,8 +84,10 @@ class BertTokenizer(object):
         self.vocab = load_vocab(vocab_file)
         self.ids_to_tokens = collections.OrderedDict(
             [(ids, tok) for tok, ids in self.vocab.items()])
-        self.basic_tokenizer = BasicTokenizer(do_lower_case=do_lower_case)
+        self.basic_tokenizer = BasicTokenizer(do_lower_case=do_lower_case,
+                                              never_split=never_split)
         self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab)
+        self.max_len = max_len if max_len is not None else int(1e12)
 
     def tokenize(self, text):
         split_tokens = []
@@ -91,6 +101,12 @@ class BertTokenizer(object):
         ids = []
         for token in tokens:
             ids.append(self.vocab[token])
+        if len(ids) > self.max_len:
+            raise ValueError(
+                "Token indices sequence length is longer than the specified maximum "
+                " sequence length for this BERT model ({} > {}). Running this"
+                " sequence through BERT will result in indexing errors".format(len(ids), self.max_len)
+            )
         return ids
 
     def convert_ids_to_tokens(self, ids):
@@ -129,6 +145,11 @@ class BertTokenizer(object):
         else:
             logger.info("loading vocabulary file {} from cache at {}".format(
                 vocab_file, resolved_vocab_file))
+        if pretrained_model_name in PRETRAINED_VOCAB_POSITIONAL_EMBEDDINGS_SIZE_MAP:
+            # if we're using a pretrained model, ensure the tokenizer wont index sequences longer
+            # than the number of positional embeddings
+            max_len = PRETRAINED_VOCAB_POSITIONAL_EMBEDDINGS_SIZE_MAP[pretrained_model_name]
+            kwargs['max_len'] = min(kwargs.get('max_len', int(1e12)), max_len)
         # Instantiate tokenizer.
         tokenizer = cls(resolved_vocab_file, *inputs, **kwargs)
         return tokenizer
@@ -137,13 +158,16 @@ class BertTokenizer(object):
 class BasicTokenizer(object):
     """Runs basic tokenization (punctuation splitting, lower casing, etc.)."""
 
-    def __init__(self, do_lower_case=True):
+    def __init__(self,
+                 do_lower_case=True,
+                 never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]")):
         """Constructs a BasicTokenizer.
 
         Args:
           do_lower_case: Whether to lower case the input.
         """
         self.do_lower_case = do_lower_case
+        self.never_split = never_split
 
     def tokenize(self, text):
         """Tokenizes a piece of text."""
@@ -158,7 +182,7 @@ class BasicTokenizer(object):
         orig_tokens = whitespace_tokenize(text)
         split_tokens = []
         for token in orig_tokens:
-            if self.do_lower_case:
+            if self.do_lower_case and token not in self.never_split:
                 token = token.lower()
                 token = self._run_strip_accents(token)
             split_tokens.extend(self._run_split_on_punc(token))
@@ -179,6 +203,8 @@ class BasicTokenizer(object):
 
     def _run_split_on_punc(self, text):
         """Splits punctuation on a piece of text."""
+        if text in self.never_split:
+            return [text]
         chars = list(text)
         i = 0
         start_new_word = True
@@ -196,7 +222,7 @@ class BasicTokenizer(object):
             i += 1
 
         return ["".join(x) for x in output]
-    
+
     def _tokenize_chinese_chars(self, text):
         """Adds whitespace around any CJK character."""
         output = []
@@ -221,17 +247,17 @@ class BasicTokenizer(object):
         # space-separated words, so they are not treated specially and handled
         # like the all of the other languages.
         if ((cp >= 0x4E00 and cp <= 0x9FFF) or  #
-            (cp >= 0x3400 and cp <= 0x4DBF) or  #
-            (cp >= 0x20000 and cp <= 0x2A6DF) or  #
-            (cp >= 0x2A700 and cp <= 0x2B73F) or  #
-            (cp >= 0x2B740 and cp <= 0x2B81F) or  #
-            (cp >= 0x2B820 and cp <= 0x2CEAF) or
-            (cp >= 0xF900 and cp <= 0xFAFF) or  #
-            (cp >= 0x2F800 and cp <= 0x2FA1F)):  #
+                (cp >= 0x3400 and cp <= 0x4DBF) or  #
+                (cp >= 0x20000 and cp <= 0x2A6DF) or  #
+                (cp >= 0x2A700 and cp <= 0x2B73F) or  #
+                (cp >= 0x2B740 and cp <= 0x2B81F) or  #
+                (cp >= 0x2B820 and cp <= 0x2CEAF) or
+                (cp >= 0xF900 and cp <= 0xFAFF) or  #
+                (cp >= 0x2F800 and cp <= 0x2FA1F)):  #
             return True
-    
+
         return False
-    
+
     def _clean_text(self, text):
         """Performs invalid character removal and whitespace cleanup on text."""
         output = []
@@ -266,7 +292,7 @@ class WordpieceTokenizer(object):
 
         Args:
           text: A single token or whitespace separated tokens. This should have
-            already been passed through `BasicTokenizer.
+            already been passed through `BasicTokenizer`.
 
         Returns:
           A list of wordpiece tokens.
