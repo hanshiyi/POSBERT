@@ -34,7 +34,7 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 
-from pytorch_pretrained_bert.tokenization import whitespace_tokenize, BasicTokenizer, BertTokenizer
+from bert_tokenization import (BasicTokenizer, BertTokenizer, whitespace_tokenize)
 from pytorch_pretrained_bert.modeling import BertPOSQuestionAnswering
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
@@ -935,7 +935,7 @@ def main():
 
     if args.fp16:
         try:
-            from apex.optimizers import FP16_Optimizer
+            from apex.fp16_utils import FP16_Optimizer
             from apex.optimizers import FusedAdam
         except ImportError:
             raise ImportError(
@@ -943,8 +943,7 @@ def main():
 
         optimizer = FusedAdam(optimizer_grouped_parameters,
                               lr=args.learning_rate,
-                              bias_correction=False,
-                              max_grad_norm=1.0)
+                              bias_correction=False)
         if args.loss_scale == 0:
             optimizer = FP16_Optimizer(optimizer, dynamic_loss_scale=True)
         else:
@@ -983,11 +982,12 @@ def main():
                 if n_gpu == 1:
                     batch = tuple(t.to(device) for t in batch)  # multi-gpu does scattering it-self
                 input_ids, input_tags, input_mask, segment_ids, start_positions, end_positions = batch
-                try:
-                    loss = model(input_ids, input_tags, segment_ids, input_mask, start_positions, end_positions)
-                except Exception as e:
-                    logger.info(str(e))
-                    continue
+                loss = model(input_ids, input_tags, segment_ids, input_mask, start_positions, end_positions)
+                #try:
+                #    loss = model(input_ids, input_tags, segment_ids, input_mask, start_positions, end_positions)
+                #except Exception as e:
+                #    logger.info(str(e))
+                #    continue
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu.
                 if args.gradient_accumulation_steps > 1:
@@ -1009,18 +1009,18 @@ def main():
                     optimizer.zero_grad()
                     global_step += 1
 
-                # Save a trained model
-                model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-                output_model_file = os.path.join(args.output_dir, "pytorch_model_{}.bin".format(epoch))
-                if args.do_train:
-                    torch.save(model_to_save.state_dict(), output_model_file)
-                #     # Load a trained model that you have fine-tuned
-                #     model_state_dict = torch.load(output_model_file)
-                #     model = BertForQuestionAnswering.from_pretrained(args.bert_model, state_dict=model_state_dict)
-                # else:
-                #     model = BertForQuestionAnswering.from_pretrained(args.bert_model)
+            # Save a trained model
+            model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
+            output_model_file = os.path.join(args.output_dir, "pytorch_model_{}.bin".format(epoch))
+            if args.do_train:
+                torch.save(model_to_save.state_dict(), output_model_file)
+            #    # Load a trained model that you have fine-tuned
+            #    model_state_dict = torch.load(output_model_file)
+            #    model = BertPOSQuestionAnswering.from_pretrained(args.bert_model, state_dict=model_state_dict)
+            #else:
+            #    model = BertPOSQuestionAnswering.from_pretrained(args.bert_model)
 
-                # model.to(device)
+            #model.to(device)
 
             if args.do_predict and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
                 eval_examples = read_squad_examples(

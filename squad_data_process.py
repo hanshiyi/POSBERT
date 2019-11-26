@@ -724,6 +724,9 @@ def convert_examples_to_features_tags(examples, tokenizer, max_seq_length,
             input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
             input_tags = tokenizer.convert_token_ids_to_tag_ids(input_ids, parsed_words, parser.tag_to_id)
+            # print(parser.tag_to_id)
+            # print(len(parser.tag_to_id))
+            # exit()
 
             # The mask has 1 for real tokens and 0 for padding tokens. Only real
             # tokens are attended to.
