@@ -454,7 +454,7 @@ class PreTrainedBertModel(nn.Module):
             module.bias.data.zero_()
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name, cache_dir=None, *inputs, **kwargs):
+    def from_pretrained(cls, pretrained_model_name, cache_dir=None, state_dict=None, *inputs, **kwargs):
         """
         Instantiate a PreTrainedBertModel from a pre-trained model file.
         Download and cache the pre-trained model file if needed.
@@ -512,7 +512,9 @@ class PreTrainedBertModel(nn.Module):
         # Instantiate model.
         model = cls(config, *inputs, **kwargs)
         weights_path = os.path.join(serialization_dir, WEIGHTS_NAME)
-        state_dict = torch.load(weights_path)
+        if state_dict is None:
+            logger.info("Loading pretrained BERT!")
+            state_dict = torch.load(weights_path)
 
         missing_keys = []
         unexpected_keys = []
@@ -1102,7 +1104,7 @@ class BertPOSQuestionAnswering(PreTrainedBertModel):
             return start_logits, end_logits
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name, cache_dir=None, *inputs, **kwargs):
+    def from_pretrained(cls, pretrained_model_name, cache_dir=None, state_dict=None, *inputs, **kwargs):
         """
         Instantiate a PreTrainedBertModel from a pre-trained model file.
         Download and cache the pre-trained model file if needed.
@@ -1168,7 +1170,9 @@ class BertPOSQuestionAnswering(PreTrainedBertModel):
         # Instantiate model.
         model = cls(config, pos_config, *inputs, **kwargs)
         weights_path = os.path.join(serialization_dir, WEIGHTS_NAME)
-        state_dict = torch.load(weights_path)
+        if state_dict is None:
+            logger.info("Loading pretrained BERT!")
+            state_dict = torch.load(weights_path)
 
         missing_keys = []
         unexpected_keys = []

@@ -724,9 +724,9 @@ def convert_examples_to_features_tags(examples, tokenizer, max_seq_length,
             input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
             input_tags = tokenizer.convert_token_ids_to_tag_ids(input_ids, parsed_words, parser.tag_to_id)
-            # print(parser.tag_to_id)
-            # print(len(parser.tag_to_id))
-            # exit()
+            #print(parser.tag_to_id)
+            #print(len(parser.tag_to_id))
+            #exit()
 
             # The mask has 1 for real tokens and 0 for padding tokens. Only real
             # tokens are attended to.
@@ -849,6 +849,7 @@ def convert_json_to_features_and_tags(path, tokenizer, is_training=True, version
     # print("hehehe", path, is_training, version_2_with_negative, store)
     # parser = Lex_parser()
     examples = read_squad_examples_from_json(path, is_training, version_2_with_negative)
+    print("Start converting examples to features and tags")
     bert_res, lex_res = convert_examples_to_features_tags(examples, tokenizer, max_seq_length, doc_stride, max_query_length, is_training)
 
 
@@ -1670,6 +1671,8 @@ def answer_question(context, question, model):
 if __name__ == "__main__":
 
     train_file = 'data/squad/train-v2.0.json'
+    test_file = 'data/squad/dev-v2.0.json'
+
     version_2_with_negative = True  # The questions may have no answers
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
     lex_parser = Lex_parser()
@@ -1682,7 +1685,8 @@ if __name__ == "__main__":
     # print("syntax tags", len(tags))
     # print(tags[0].__dict__)
 
-    bert_features, lex_tags = convert_json_to_features_and_tags(path=train_file, tokenizer=tokenizer, version_2_with_negative=True)
+    #bert_features, lex_tags = convert_json_to_features_and_tags(path=train_file, tokenizer=tokenizer, version_2_with_negative=True)
+    bert_features, lex_tags = convert_json_to_features_and_tags(path=train_file, tokenizer=tokenizer, is_training=False,version_2_with_negative=True)
     print("bert features", len(bert_features))
     print("lex tags", len(lex_tags))
     # all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
