@@ -117,7 +117,7 @@ class BertTokenizer(object):
             #     exit(0)
             # Is this right?
             if token not in self.child_parent:
-                self.child_id_parent[id] = 'UNKNOWN'
+                self.child_id_parent[id] = 'CLSSEP'
             else:
                 self.child_id_parent[id] = self.child_parent[token]
 
@@ -153,7 +153,11 @@ class BertTokenizer(object):
                 raise Exception("cannot find the origin token of token_id {0}".format(i))
             # print("parent tags:", len(parent_tags), len(token_ids))
             # Maybe modify here
-            ids.append(tag_ids.get(parent_tags.get(word_parent, 'NN'), -1))
+            if word_parent == 'CLSSEP':
+                id = tag_ids.get(parent_tags.get(word_parent, 'CLSSEP'), -1)
+            else:
+                id = tag_ids.get(parent_tags.get(word_parent), -2)
+            ids.append(id)
         return ids
 
     @classmethod

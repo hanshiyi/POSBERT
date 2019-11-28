@@ -17,9 +17,13 @@ from bert_tokenization import BasicTokenizer
 from typing import Union
 
 class Lex_parser:
-    def __init__(self, uncased=True):
-        self.uncased=True
-        self.tag_to_id = {}
+    def __init__(self, tag_id_initialized=False, tag_id=None, uncased=True):
+        self.uncased=uncased
+        self.tag_id_initialized = tag_id_initialized
+        if tag_id_initialized:
+            self.tag_to_id = tag_id
+        else:
+            self.tag_to_id = {}
         self.parser = CoreNLPParser(url='http://localhost:9000', tagtype='pos')
         self.basic_tokenizer = BasicTokenizer()
 
@@ -39,9 +43,10 @@ class Lex_parser:
         sentence = self.basic_tokenizer.tokenize(sentence)
         tags = self.parser.tag(sentence)
 
-        for tag in tags:
-            if tag[1] not in self.tag_to_id:
-                self.tag_to_id[tag[1]] = len(self.tag_to_id)
+        if not self.tag_id_initialized:
+            for tag in tags:
+                if tag[1] not in self.tag_to_id:
+                    self.tag_to_id[tag[1]] = len(self.tag_to_id)
         return tags
 
     def convert_tags_to_ids(self, tags):
@@ -56,17 +61,6 @@ class Lex_parser:
         if not self.parser:
             self.parser = CoreNLPParser(url='http://localhost:9000', tagtype='pos')
 
-        # if type(sentence) == str:
-        #     if self.uncased:
-        #         sentence = sentence.lower()
-        #
-        # else:
-        #     sentence = " ".join(sentence)
-        #     if self.uncased:
-        #         sentence = sentence.lower()
-        #
-        # sentence = self.basic_tokenizer.tokenize(sentence)
-
         tags = self.convert_sentence_to_tags(sentence)
         ids = self.convert_tags_to_ids(tags)
         print(type(sentence), len(sentence), len(tags), len(ids))
@@ -75,5 +69,5 @@ class Lex_parser:
 
 if __name__ == "__main__":
     lex_parser = Lex_parser()
-    print(list(lex_parser.convert_sentence_to_tags("The price of car is N, which is unaffordable. <eos>")))
+    print(list(lex_parser.convert_sentence_to_tags("The price of car is N, "" which is unaffordable. <eos>")))
     print(list(lex_parser.convert_sentence_to_ids("The price of car is N, which is unaffordable.")))
