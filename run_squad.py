@@ -967,7 +967,7 @@ def main():
 
     global_step = 0
     if args.do_train:
-        train_features, train_lex = convert_json_to_features_and_tags("data/squad/train-v2.0.json", 
+        train_features, train_lex = convert_json_to_features_and_tags(args.train_file, 
                 tokenizer=tokenizer, 
                 version_2_with_negative=args.version_2_with_negative)
         logger.info("***** Running training *****")
@@ -1029,12 +1029,11 @@ def main():
                 torch.save(model_to_save.state_dict(), output_model_file)
 
     if args.do_predict and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        path = "data/squad/dev-v2.0.json"
-        eval_examples = read_squad_examples_from_json(path, is_training=False, 
+        eval_examples = read_squad_examples_from_json(args.predict_file, is_training=False, 
                 version_2_with_negative=args.version_2_with_negative)
-        eval_features, eval_lex = convert_json_to_features_and_tags("data/squad/dev-v2.0.json", tokenizer, 
+        eval_features, eval_lex = convert_json_to_features_and_tags(args.predict_file, tokenizer, 
                 is_training=False, 
-                version_2_with_negative=True)
+                version_2_with_negative=args.version_2_with_negative)
         #eval_examples = read_squad_examples(
         #    input_file=args.predict_file, is_training=False,
         #    version_2_with_negative=args.version_2_with_negative)
@@ -1047,7 +1046,7 @@ def main():
         #    is_training=False)
 
         logger.info("***** Running predictions *****")
-        #logger.info("  Num orig examples = %d", len(eval_examples))
+        logger.info("  Num orig examples = %d", len(eval_examples))
         logger.info("  Num split examples = %d", len(eval_features))
         logger.info("  Num lex examples = %d", len(eval_lex))
         logger.info("  Batch size = %d", args.predict_batch_size)
