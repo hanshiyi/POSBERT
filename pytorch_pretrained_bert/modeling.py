@@ -1162,7 +1162,7 @@ class BertPOSQuestionAnswering(PreTrainedBertModel):
         logger.info("Model config {}".format(config))
         # set pos config
         pos_config = copy.deepcopy(config)
-        pos_config.vocab_size = 50 # should be 27
+        pos_config.vocab_size = 47 # should be 27
         pos_config.hidden_size = 12
         pos_config.intermediate_size = 45 #180
         pos_config.num_hidden_layers = 3
