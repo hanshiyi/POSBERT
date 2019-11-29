@@ -23,7 +23,7 @@ class Lex_parser:
         if tag_id_initialized:
             self.tag_to_id = tag_id
         else:
-            self.tag_to_id = {}
+            self.tag_to_id = {"CLSSEP": 0, "UNKNOWN": 1}
         self.parser = CoreNLPParser(url='http://localhost:9000', tagtype='pos')
         self.basic_tokenizer = BasicTokenizer()
 

@@ -154,9 +154,9 @@ class BertTokenizer(object):
             # print("parent tags:", len(parent_tags), len(token_ids))
             # Maybe modify here
             if word_parent == 'CLSSEP':
-                id = tag_ids.get(parent_tags.get(word_parent, 'CLSSEP'), -1)
+                id = tag_ids.get(parent_tags.get(word_parent, 'CLSSEP'))
             else:
-                id = tag_ids.get(parent_tags.get(word_parent), -2)
+                id = tag_ids.get(parent_tags.get(word_parent, 'UNKNOWN'))
             ids.append(id)
         return ids
 

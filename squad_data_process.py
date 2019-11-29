@@ -1695,10 +1695,12 @@ if __name__ == "__main__":
 
     version_2_with_negative = True  # The questions may have no answers
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-    bert_features, lex_tags = convert_json_to_features_and_tags(path=train_file, tokenizer=tokenizer, is_training=False,version_2_with_negative=True)
+    bert_features, lex_tags = convert_json_to_features_and_tags(path=train_file, tokenizer=tokenizer, is_training=True,version_2_with_negative=True)
+    print(bert_features[0].__dict__)
     print("bert features", len(bert_features))
     print("lex tags", len(lex_tags))
     bert_test_features, lex_test_tags = convert_json_to_features_and_tags(path=test_file, tokenizer=tokenizer, is_training=False,
                                                                 version_2_with_negative=True)
     print("bert features", len(bert_test_features))
     print("lex tags", len(lex_test_tags))
+    print(bert_test_features[0].__dict__)
