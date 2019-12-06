@@ -5,7 +5,6 @@ stanford-corenlp-full-2018-10-05/
 *.zip
 .DS_Store
 *.pickle
-data/
 runs/
 temp
 __pycache__

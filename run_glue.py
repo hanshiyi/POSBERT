@@ -32,42 +32,45 @@ from torch.utils.data.distributed import DistributedSampler
 
 try:
     from torch.utils.tensorboard import SummaryWriter
+
 except:
     from tensorboardX import SummaryWriter
 
 from tqdm import tqdm, trange
 
-from transformers import (WEIGHTS_NAME, BertConfig,
+from glue_data_process import (WEIGHTS_NAME, BertConfig,
                                   BertForSequenceClassification, #BertTokenizer,
-                                  RobertaConfig,
-                                  RobertaForSequenceClassification,
-                                  RobertaTokenizer,
-                                  XLMConfig, XLMForSequenceClassification,
-                                  XLMTokenizer, XLNetConfig,
-                                  XLNetForSequenceClassification,
-                                  XLNetTokenizer,
-                                  DistilBertConfig,
-                                  DistilBertForSequenceClassification,
-                                  DistilBertTokenizer,
-                                  AlbertConfig,
-                                  AlbertForSequenceClassification, 
-                                  AlbertTokenizer,
+                                  # RobertaConfig,
+                                  # RobertaForSequenceClassification,
+                                  # RobertaTokenizer,
+                                  # XLMConfig, XLMForSequenceClassification,
+                                  # XLMTokenizer, XLNetConfig,
+                                  # XLNetForSequenceClassification,
+                                  # XLNetTokenizer,
+                                  # DistilBertConfig,
+                                  # DistilBertForSequenceClassification,
+                                  # DistilBertTokenizer,
+                                  # AlbertConfig,
+                                  # AlbertForSequenceClassification,
+                                  # AlbertTokenizer,
                                 )
 
 from bert_tokenization import (BasicTokenizer, BertTokenizer, whitespace_tokenize)
 from lex_parser import Lex_parser
-from transformers import AdamW, get_linear_schedule_with_warmup
+from glue_data_process import AdamW, get_linear_schedule_with_warmup
 
-from transformers import glue_compute_metrics as compute_metrics
-from transformers import glue_output_modes as output_modes
-from transformers import glue_processors as processors
-from transformers import glue_convert_examples_to_features as convert_examples_to_features
-from transformers import glue_convert_examples_to_features_tags as convert_examples_to_features_tags
+from glue_data_process import glue_compute_metrics as compute_metrics
+from glue_data_process import glue_output_modes as output_modes
+from glue_data_process import glue_processors as processors
+from glue_data_process import glue_convert_examples_to_features as convert_examples_to_features
+from glue_data_process import glue_convert_examples_to_features_tags as convert_examples_to_features_tags
 
 logger = logging.getLogger(__name__)
 
-ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig, 
-                                                                                RobertaConfig, DistilBertConfig)), ())
+# ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in (BertConfig, XLNetConfig, XLMConfig,
+#                                                                                RobertaConfig, DistilBertConfig)), ())
+
+ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in [BertConfig]), ())
 
 MODEL_CLASSES = {
     'bert': (BertConfig, BertForSequenceClassification, BertTokenizer),
@@ -154,7 +157,7 @@ def train(args, train_dataset, model, tokenizer):
             if args.model_type != 'distilbert':
                 inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
             outputs = model(**inputs)
-            loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
+            loss = outputs[0]  # model outputs are always tuple in glue_data_process (see doc)
 
             if args.n_gpu > 1:
                 loss = loss.mean() # mean() to average on multi-gpu parallel training
@@ -524,7 +527,7 @@ def main():
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:
             checkpoints = list(os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
-            logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
+            logging.getLogger("glue_data_process.modeling_utils").setLevel(logging.WARN)  # Reduce logging
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""
@@ -848,7 +851,7 @@ def run_glue():
     if args.do_train:
         features_dataset, tags_dataset = load_and_cache_examples_features_tags(args, args.task_name, tokenizer, lex_parser, evaluate=False)
         # TODO: please uncomment this.
-        # global_step, tr_loss = train(args, features_dataset, model, tokenizer)
+        global_step, tr_loss = train(args, features_dataset, model, tokenizer)
         # logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
         print("get training dataset")
 
@@ -885,7 +888,7 @@ def run_glue():
         if args.eval_all_checkpoints:
             checkpoints = list(
                 os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + '/**/' + WEIGHTS_NAME, recursive=True)))
-            logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
+            logging.getLogger("glue_data_process.modeling_utils").setLevel(logging.WARN)  # Reduce logging
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split('-')[-1] if len(checkpoints) > 1 else ""

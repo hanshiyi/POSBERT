@@ -654,7 +654,7 @@ class BertTokenizer(object):
             This won't save modifications other than (added tokens and special token mapping) you may have
             applied to the tokenizer after the instantiation (e.g. modifying tokenizer.do_lower_case after creation).
 
-            This method make sure the full tokenizer can then be re-loaded using the :func:`~transformers.PreTrainedTokenizer.from_pretrained` class method.
+            This method make sure the full tokenizer can then be re-loaded using the :func:`~glue_data_process.PreTrainedTokenizer.from_pretrained` class method.
         """
         if not os.path.isdir(save_directory):
             logger.error("Saving directory ({}) should be a directory".format(save_directory))
