@@ -6,3 +6,6 @@ stanford-corenlp-full-2018-10-05/
 .DS_Store
 *.pickle
 data/
+runs/
+temp
+__pycache__
