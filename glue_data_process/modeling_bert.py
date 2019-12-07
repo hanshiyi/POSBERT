@@ -968,36 +968,6 @@ class BertForNextSentencePrediction(BertPreTrainedModel):
                       BERT_START_DOCSTRING,
                       BERT_INPUTS_DOCSTRING)
 class BertForSequenceClassification(BertPreTrainedModel):
-    r"""
-        **labels**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
-            Labels for computing the sequence classification/regression loss.
-            Indices should be in ``[0, ..., config.num_labels - 1]``.
-            If ``config.num_labels == 1`` a regression loss is computed (Mean-Square loss),
-            If ``config.num_labels > 1`` a classification loss is computed (Cross-Entropy).
-
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **loss**: (`optional`, returned when ``labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
-            Classification (or regression if config.num_labels==1) loss.
-        **logits**: ``torch.FloatTensor`` of shape ``(batch_size, config.num_labels)``
-            Classification (or regression if config.num_labels==1) scores (before SoftMax).
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``torch.FloatTensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``torch.FloatTensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
-
-    Examples::
-
-        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        model = BertForSequenceClassification.from_pretrained('bert-base-uncased')
-        input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
-        labels = torch.tensor([1]).unsqueeze(0)  # Batch size 1
-        outputs = model(input_ids, labels=labels)
-        loss, logits = outputs[:2]
-
-    """
     def __init__(self, config):
         super(BertForSequenceClassification, self).__init__(config)
         self.num_labels = config.num_labels
@@ -1194,46 +1164,6 @@ class BertForTokenClassification(BertPreTrainedModel):
                       BERT_START_DOCSTRING,
                       BERT_INPUTS_DOCSTRING)
 class BertForQuestionAnswering(BertPreTrainedModel):
-    r"""
-        **start_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
-            Labels for position (index) of the start of the labelled span for computing the token classification loss.
-            Positions are clamped to the length of the sequence (`sequence_length`).
-            Position outside of the sequence are not taken into account for computing the loss.
-        **end_positions**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size,)``:
-            Labels for position (index) of the end of the labelled span for computing the token classification loss.
-            Positions are clamped to the length of the sequence (`sequence_length`).
-            Position outside of the sequence are not taken into account for computing the loss.
-
-    Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
-        **loss**: (`optional`, returned when ``labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
-            Total span extraction loss is the sum of a Cross-Entropy for the start and end positions.
-        **start_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
-            Span-start scores (before SoftMax).
-        **end_scores**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length,)``
-            Span-end scores (before SoftMax).
-        **hidden_states**: (`optional`, returned when ``config.output_hidden_states=True``)
-            list of ``torch.FloatTensor`` (one for the output of each layer + the output of the embeddings)
-            of shape ``(batch_size, sequence_length, hidden_size)``:
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        **attentions**: (`optional`, returned when ``config.output_attentions=True``)
-            list of ``torch.FloatTensor`` (one for each layer) of shape ``(batch_size, num_heads, sequence_length, sequence_length)``:
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention heads.
-
-    Examples::
-
-        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        model = BertForQuestionAnswering.from_pretrained('bert-large-uncased-whole-word-masking-finetuned-squad')
-        question, text = "Who was Jim Henson?", "Jim Henson was a nice puppet"
-        input_text = "[CLS] " + question + " [SEP] " + text + " [SEP]"
-        input_ids = tokenizer.encode(input_text)
-        token_type_ids = [0 if i <= input_ids.index(102) else 1 for i in range(len(input_ids))] 
-        start_scores, end_scores = model(torch.tensor([input_ids]), token_type_ids=torch.tensor([token_type_ids]))
-        all_tokens = tokenizer.convert_ids_to_tokens(input_ids)  
-        print(' '.join(all_tokens[torch.argmax(start_scores) : torch.argmax(end_scores)+1]))
-        # a nice puppet
-
-
-    """
     def __init__(self, config):
         super(BertForQuestionAnswering, self).__init__(config)
         self.num_labels = config.num_labels
@@ -1278,4 +1208,213 @@ class BertForQuestionAnswering(BertPreTrainedModel):
             total_loss = (start_loss + end_loss) / 2
             outputs = (total_loss,) + outputs
 
-        return outputs  # (loss), start_logits, end_logits, (hidden_states), (attentions)
+        return outputs
+
+class BertPOSForSequenceClassification(BertPreTrainedModel):
+    def __init__(self, config, posconfig):
+        super(BertPOSForSequenceClassification, self).__init__(config)
+        self.num_labels = config.num_labels
+
+        self.bert = BertModel(config)
+        self.posbert = BertModel(posconfig)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size + posconfig.hidden_size, self.config.num_labels)
+
+        self.init_weights()
+
+    def forward(self, input_ids=None, pos_ids=None, attention_mask=None, token_type_ids=None,
+                position_ids=None, head_mask=None, inputs_embeds=None, labels=None):
+
+        outputs = self.bert(input_ids,
+                            attention_mask=attention_mask,
+                            token_type_ids=token_type_ids,
+                            position_ids=position_ids,
+                            head_mask=head_mask,
+                            inputs_embeds=inputs_embeds)
+        pos_outputs = self.posbert(pos_ids,
+                            attention_mask=attention_mask,
+                            token_type_ids=token_type_ids,
+                            position_ids=position_ids,
+                            head_mask=head_mask,
+                            inputs_embeds=inputs_embeds)
+
+        pooled_output = outputs[1]
+        pos_pooled_output = pos_outputs[1]
+
+        pooled_output = self.dropout(pooled_output)
+        pos_pooled_output = self.dropout(pos_pooled_output)
+        logits = self.classifier(torch.cat([pooled_output, pos_pooled_output], -1))
+        outputs[2] = torch.cat([outputs[2], pos_outputs[2]], -1)
+        outputs[3] = torch.cat([outputs[3], pos_outputs[3]], -1)
+        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            if self.num_labels == 1:
+                #  We are doing regression
+                loss_fct = MSELoss()
+                loss = loss_fct(logits.view(-1), labels.view(-1))
+            else:
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            outputs = (loss,) + outputs
+
+        return outputs
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        if "albert" in pretrained_model_name_or_path and "v2" in pretrained_model_name_or_path:
+            logger.warning("There is currently an upstream reproducibility issue with ALBERT v2 models. Please see " +
+                           "https://github.com/google-research/google-research/issues/119 for more information.")
+
+        config = kwargs.pop('config', None)
+        state_dict = kwargs.pop('state_dict', None)
+        cache_dir = kwargs.pop('cache_dir', None)
+        from_tf = kwargs.pop('from_tf', False)
+        force_download = kwargs.pop('force_download', False)
+        resume_download = kwargs.pop('resume_download', False)
+        proxies = kwargs.pop('proxies', None)
+        output_loading_info = kwargs.pop('output_loading_info', False)
+
+        # Load config
+        if config is None:
+            config, model_kwargs = cls.config_class.from_pretrained(
+                pretrained_model_name_or_path, *model_args,
+                cache_dir=cache_dir, return_unused_kwargs=True,
+                force_download=force_download,
+                resume_download=resume_download,
+                proxies=proxies,
+                **kwargs
+            )
+        else:
+            model_kwargs = kwargs
+
+        # Load model
+        if pretrained_model_name_or_path is not None:
+            if pretrained_model_name_or_path in cls.pretrained_model_archive_map:
+                archive_file = cls.pretrained_model_archive_map[pretrained_model_name_or_path]
+            elif os.path.isdir(pretrained_model_name_or_path):
+                if from_tf and os.path.isfile(os.path.join(pretrained_model_name_or_path, TF_WEIGHTS_NAME + ".index")):
+                    # Load from a TF 1.0 checkpoint
+                    archive_file = os.path.join(pretrained_model_name_or_path, TF_WEIGHTS_NAME + ".index")
+                elif from_tf and os.path.isfile(os.path.join(pretrained_model_name_or_path, TF2_WEIGHTS_NAME)):
+                    # Load from a TF 2.0 checkpoint
+                    archive_file = os.path.join(pretrained_model_name_or_path, TF2_WEIGHTS_NAME)
+                elif os.path.isfile(os.path.join(pretrained_model_name_or_path, WEIGHTS_NAME)):
+                    # Load from a PyTorch checkpoint
+                    archive_file = os.path.join(pretrained_model_name_or_path, WEIGHTS_NAME)
+                else:
+                    raise EnvironmentError(
+                        "Error no file named {} found in directory {} or `from_tf` set to False".format(
+                            [WEIGHTS_NAME, TF2_WEIGHTS_NAME, TF_WEIGHTS_NAME + ".index"],
+                            pretrained_model_name_or_path))
+            elif os.path.isfile(pretrained_model_name_or_path):
+                archive_file = pretrained_model_name_or_path
+            else:
+                assert from_tf, "Error finding file {}, no file or TF 1.X checkpoint found".format(
+                    pretrained_model_name_or_path)
+                archive_file = pretrained_model_name_or_path + ".index"
+
+            # redirect to the cache, if necessary
+            try:
+                resolved_archive_file = cached_path(archive_file, cache_dir=cache_dir, force_download=force_download,
+                                                    proxies=proxies, resume_download=resume_download)
+            except EnvironmentError:
+                if pretrained_model_name_or_path in cls.pretrained_model_archive_map:
+                    msg = "Couldn't reach server at '{}' to download pretrained weights.".format(
+                        archive_file)
+                else:
+                    msg = "Model name '{}' was not found in model name list ({}). " \
+                          "We assumed '{}' was a path or url to model weight files named one of {} but " \
+                          "couldn't find any such file at this path or url.".format(
+                        pretrained_model_name_or_path,
+                        ', '.join(cls.pretrained_model_archive_map.keys()),
+                        archive_file,
+                        [WEIGHTS_NAME, TF2_WEIGHTS_NAME, TF_WEIGHTS_NAME])
+                raise EnvironmentError(msg)
+
+            if resolved_archive_file == archive_file:
+                logger.info("loading weights file {}".format(archive_file))
+            else:
+                logger.info("loading weights file {} from cache at {}".format(
+                    archive_file, resolved_archive_file))
+        else:
+            resolved_archive_file = None
+
+        # Instantiate model.
+        model = cls(config, *model_args, **model_kwargs)
+
+        if state_dict is None and not from_tf:
+            state_dict = torch.load(resolved_archive_file, map_location='cpu')
+
+        missing_keys = []
+        unexpected_keys = []
+        error_msgs = []
+
+        if from_tf:
+            pass
+        else:
+            # Convert old format to new format if needed from a PyTorch state_dict
+            old_keys = []
+            new_keys = []
+            for key in state_dict.keys():
+                new_key = None
+                if 'gamma' in key:
+                    new_key = key.replace('gamma', 'weight')
+                if 'beta' in key:
+                    new_key = key.replace('beta', 'bias')
+                if key == 'lm_head.decoder.weight':
+                    new_key = 'lm_head.weight'
+                if new_key:
+                    old_keys.append(key)
+                    new_keys.append(new_key)
+            for old_key, new_key in zip(old_keys, new_keys):
+                state_dict[new_key] = state_dict.pop(old_key)
+
+            # copy state_dict so _load_from_state_dict can modify it
+            metadata = getattr(state_dict, '_metadata', None)
+            state_dict = state_dict.copy()
+            if metadata is not None:
+                state_dict._metadata = metadata
+
+            # PyTorch's `_load_from_state_dict` does not copy parameters in a module's descendants
+            # so we need to apply the function recursively.
+            def load(module, prefix=''):
+                local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+                module._load_from_state_dict(
+                    state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
+                for name, child in module._modules.items():
+                    if child is not None:
+                        load(child, prefix + name + '.')
+
+            # Make sure we are able to load base models as well as derived models (with heads)
+            start_prefix = ''
+            model_to_load = model
+            if not hasattr(model, cls.base_model_prefix) and any(
+                    s.startswith(cls.base_model_prefix) for s in state_dict.keys()):
+                start_prefix = cls.base_model_prefix + '.'
+            if hasattr(model, cls.base_model_prefix) and not any(
+                    s.startswith(cls.base_model_prefix) for s in state_dict.keys()):
+                model_to_load = getattr(model, cls.base_model_prefix)
+
+            load(model_to_load, prefix=start_prefix)
+            if len(missing_keys) > 0:
+                logger.info("Weights of {} not initialized from pretrained model: {}".format(
+                    model.__class__.__name__, missing_keys))
+            if len(unexpected_keys) > 0:
+                logger.info("Weights from pretrained model not used in {}: {}".format(
+                    model.__class__.__name__, unexpected_keys))
+            if len(error_msgs) > 0:
+                raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+                    model.__class__.__name__, "\n\t".join(error_msgs)))
+
+        if hasattr(model, 'tie_weights'):
+            model.tie_weights()  # make sure word embedding weights are still tied
+
+        # Set model in evaluation mode to desactivate DropOut modules by default
+        model.eval()
+
+        if output_loading_info:
+            loading_info = {"missing_keys": missing_keys, "unexpected_keys": unexpected_keys, "error_msgs": error_msgs}
+            return model, loading_info
+
+        return model
