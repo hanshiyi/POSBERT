@@ -21,6 +21,7 @@ import logging
 import math
 import os
 import sys
+import copy
 
 import torch
 from torch import nn
@@ -29,6 +30,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from .modeling_utils import PreTrainedModel, prune_linear_layer
 from .configuration_bert import BertConfig
 from .file_utils import add_start_docstrings
+from .file_utils import cached_path, WEIGHTS_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -963,10 +965,6 @@ class BertForNextSentencePrediction(BertPreTrainedModel):
         return outputs  # (next_sentence_loss), seq_relationship_score, (hidden_states), (attentions)
 
 
-@add_start_docstrings("""Bert Model transformer with a sequence classification/regression head on top (a linear layer on top of
-                      the pooled output) e.g. for GLUE tasks. """,
-                      BERT_START_DOCSTRING,
-                      BERT_INPUTS_DOCSTRING)
 class BertForSequenceClassification(BertPreTrainedModel):
     def __init__(self, config):
         super(BertForSequenceClassification, self).__init__(config)
@@ -1159,10 +1157,6 @@ class BertForTokenClassification(BertPreTrainedModel):
         return outputs  # (loss), scores, (hidden_states), (attentions)
 
 
-@add_start_docstrings("""Bert Model with a span classification head on top for extractive question-answering tasks like SQuAD (a linear layers on top of
-                      the hidden-states output to compute `span start logits` and `span end logits`). """,
-                      BERT_START_DOCSTRING,
-                      BERT_INPUTS_DOCSTRING)
 class BertForQuestionAnswering(BertPreTrainedModel):
     def __init__(self, config):
         super(BertForQuestionAnswering, self).__init__(config)
@@ -1244,8 +1238,9 @@ class BertPOSForSequenceClassification(BertPreTrainedModel):
         pooled_output = self.dropout(pooled_output)
         pos_pooled_output = self.dropout(pos_pooled_output)
         logits = self.classifier(torch.cat([pooled_output, pos_pooled_output], -1))
-        outputs[2] = torch.cat([outputs[2], pos_outputs[2]], -1)
-        outputs[3] = torch.cat([outputs[3], pos_outputs[3]], -1)
+        if len(outputs) > 2:
+            outputs[2] = torch.cat([outputs[2], pos_outputs[2]], -1)
+            outputs[3] = torch.cat([outputs[3], pos_outputs[3]], -1)
         outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
 
         if labels is not None:
@@ -1288,6 +1283,8 @@ class BertPOSForSequenceClassification(BertPreTrainedModel):
         else:
             model_kwargs = kwargs
 
+        pos_config = copy.deepcopy(config)
+        pos_config.vocab_size = 50
         # Load model
         if pretrained_model_name_or_path is not None:
             if pretrained_model_name_or_path in cls.pretrained_model_archive_map:
@@ -1341,7 +1338,7 @@ class BertPOSForSequenceClassification(BertPreTrainedModel):
             resolved_archive_file = None
 
         # Instantiate model.
-        model = cls(config, *model_args, **model_kwargs)
+        model = cls(config, pos_config, *model_args, **model_kwargs)
 
         if state_dict is None and not from_tf:
             state_dict = torch.load(resolved_archive_file, map_location='cpu')

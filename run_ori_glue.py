@@ -39,7 +39,7 @@ except:
 from tqdm import tqdm, trange
 
 from glue_data_process import (WEIGHTS_NAME, BertConfig,
-                                  BertPOSForSequenceClassification, #BertTokenizer,
+                                  BertForSequenceClassification, #BertTokenizer,
                                   # RobertaConfig,
                                   # RobertaForSequenceClassification,
                                   # RobertaTokenizer,
@@ -73,7 +73,7 @@ logger = logging.getLogger(__name__)
 ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in [BertConfig]), ())
 
 MODEL_CLASSES = {
-    'bert': (BertConfig, BertPOSForSequenceClassification, BertTokenizer),
+    'bert': (BertConfig, BertForSequenceClassification, BertTokenizer),
     # 'xlnet': (XLNetConfig, XLNetForSequenceClassification, XLNetTokenizer),
     # 'xlm': (XLMConfig, XLMForSequenceClassification, XLMTokenizer),
     # 'roberta': (RobertaConfig, RobertaForSequenceClassification, RobertaTokenizer),
@@ -152,11 +152,10 @@ def train(args, train_dataset, model, tokenizer):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             inputs = {'input_ids':      batch[0],
-                      'pos_ids':        batch[1],
-                      'attention_mask': batch[2],
-                      'labels':         batch[4]}
+                      'attention_mask': batch[1],
+                      'labels':         batch[3]}
             if args.model_type != 'distilbert':
-                inputs['token_type_ids'] = batch[3] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+                inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
             outputs = model(**inputs)
             loss = outputs[0]  # model outputs are always tuple in glue_data_process (see doc)
 
@@ -401,7 +400,7 @@ def main():
 
     parser.add_argument('--logging_steps', type=int, default=50,
                         help="Log every X updates steps.")
-    parser.add_argument('--save_steps', type=int, default=50,
+    parser.add_argument('--save_steps', type=int, default=500,
                         help="Save checkpoint every X updates steps.")
     parser.add_argument("--eval_all_checkpoints", action='store_true',
                         help="Evaluate all checkpoints starting with the same prefix as model_name ending and ending with step number")
@@ -613,9 +612,10 @@ def load_and_cache_examples_features_tags(args, task, tokenizer, parser, evaluat
     elif output_mode == "regression":
         all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
 
-    features_dataset = TensorDataset(all_input_ids, all_input_tag_ids, all_attention_mask, all_token_type_ids, all_labels)
+    features_dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
+    tags_dataset = TensorDataset(all_input_tag_ids, all_attention_mask, all_token_type_ids, all_labels)
 
-    return features_dataset
+    return features_dataset, tags_dataset
 
 def evaluate_lex(args, model, tokenizer, parser, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
@@ -624,7 +624,7 @@ def evaluate_lex(args, model, tokenizer, parser, prefix=""):
 
     results = {}
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
-        eval_features_dataset = load_and_cache_examples_features_tags(args, eval_task, tokenizer, parser, evaluate=True)
+        eval_features_dataset, eval_tags_dataset = load_and_cache_examples_features_tags(args, eval_task, tokenizer, parser, evaluate=True)
 
         if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(eval_output_dir)
@@ -652,11 +652,10 @@ def evaluate_lex(args, model, tokenizer, parser, prefix=""):
 
             with torch.no_grad():
                 inputs = {'input_ids':      batch[0],
-                          'pos_ids':        batch[1],
-                          'attention_mask': batch[2],
-                          'labels':         batch[4]}
+                          'attention_mask': batch[1],
+                          'labels':         batch[3]}
                 if args.model_type != 'distilbert':
-                    inputs['token_type_ids'] = batch[3] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
+                    inputs['token_type_ids'] = batch[2] if args.model_type in ['bert', 'xlnet'] else None  # XLM, DistilBERT and RoBERTa don't use segment_ids
                 outputs = model(**inputs)
                 tmp_eval_loss, logits = outputs[:2]
 
@@ -745,7 +744,7 @@ def run_glue():
 
     parser.add_argument('--logging_steps', type=int, default=50,
                         help="Log every X updates steps.")
-    parser.add_argument('--save_steps', type=int, default=500,
+    parser.add_argument('--save_steps', type=int, default=50,
                         help="Save checkpoint every X updates steps.")
     parser.add_argument("--eval_all_checkpoints", action='store_true',
                         help="Evaluate all checkpoints starting with the same prefix as model_name ending and ending with step number")
@@ -850,7 +849,7 @@ def run_glue():
 
     # Training
     if args.do_train:
-        features_dataset = load_and_cache_examples_features_tags(args, args.task_name, tokenizer, lex_parser, evaluate=False)
+        features_dataset, tags_dataset = load_and_cache_examples_features_tags(args, args.task_name, tokenizer, lex_parser, evaluate=False)
         # TODO: please uncomment this.
         global_step, tr_loss = train(args, features_dataset, model, tokenizer)
         # logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
@@ -878,13 +877,6 @@ def run_glue():
         tokenizer = tokenizer_class.from_pretrained(args.output_dir)
         model.to(args.device)
 
-    if not tag_id_initialized:
-        print("tag is not initialized, so we have to store the map here", tag_id_pickle_file)
-        with open(tag_id_pickle_file, 'wb') as f:
-            pickle.dump(lex_parser.tag_to_id, f)
-        with open(tag_id_pickle_file.replace('.pickle', '.json'), 'w') as f:
-            json.dump(lex_parser.tag_to_id, f, indent=4)
-
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
@@ -908,7 +900,14 @@ def run_glue():
             result = dict((k + '_{}'.format(global_step), v) for k, v in result.items())
             results.update(result)
 
+    if not tag_id_initialized:
+        print("tag is not initialized, so we have to store the map here", tag_id_pickle_file)
+        with open(tag_id_pickle_file, 'wb') as f:
+            pickle.dump(lex_parser.tag_to_id, f)
+        with open(tag_id_pickle_file.replace('.pickle', '.json'), 'w') as f:
+            json.dump(lex_parser.tag_to_id, f, indent=4)
+
     return results
 
 if __name__ == "__main__":
-    run_glue()
+    main()
