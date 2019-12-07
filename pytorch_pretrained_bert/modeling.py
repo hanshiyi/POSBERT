@@ -1064,6 +1064,125 @@ class BertForQuestionAnswering(PreTrainedBertModel):
         else:
             return start_logits, end_logits
 
+class BertPOSForSequenceClassification(PreTrainedBertModel):
+    def __init__(self, config, pos_config, num_labels=2):
+        super(BertForSequenceClassification, self).__init__(config)
+        self.num_labels = num_labels
+        self.bert = BertModel(config)
+        self.posbert = BertModel(pos_config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size + pos_config.hidden_size, num_labels)
+        self.apply(self.init_bert_weights)
+        self.apply(weights_init_)
+
+    def forward(self, input_ids, pos_ids, token_type_ids=None, attention_mask=None, labels=None):
+        _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
+        _, pooled_pos_output = self.bert(pos_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
+
+        pooled_output = self.dropout(pooled_output)
+        pooled_pos_output = self.dropout(pooled_pos_output)
+        logits = self.classifier(torch.cat([pooled_output, pooled_pos_output], dim=-1))
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            return loss
+        else:
+            return logits
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name, cache_dir=None, state_dict=None, *inputs, **kwargs):
+        if pretrained_model_name in PRETRAINED_MODEL_ARCHIVE_MAP:
+            archive_file = PRETRAINED_MODEL_ARCHIVE_MAP[pretrained_model_name]
+        else:
+            archive_file = pretrained_model_name
+        # redirect to the cache, if necessary
+        try:
+            resolved_archive_file = cached_path(archive_file, cache_dir=cache_dir)
+        except FileNotFoundError:
+            logger.error(
+                "Model name '{}' was not found in model name list ({}). "
+                "We assumed '{}' was a path or url but couldn't find any file "
+                "associated to this path or url.".format(
+                    pretrained_model_name,
+                    ', '.join(PRETRAINED_MODEL_ARCHIVE_MAP.keys()),
+                    archive_file))
+            return None
+        if resolved_archive_file == archive_file:
+            logger.info("loading archive file {}".format(archive_file))
+        else:
+            logger.info("loading archive file {} from cache at {}".format(
+                archive_file, resolved_archive_file))
+        tempdir = None
+        if os.path.isdir(resolved_archive_file):
+            serialization_dir = resolved_archive_file
+        else:
+            # Extract archive to temp dir
+            tempdir = tempfile.mkdtemp()
+            logger.info("extracting archive file {} to temp dir {}".format(
+                resolved_archive_file, tempdir))
+            with tarfile.open(resolved_archive_file, 'r:gz') as archive:
+                archive.extractall(tempdir)
+            serialization_dir = tempdir
+        # Load config
+        config_file = os.path.join(serialization_dir, CONFIG_NAME)
+        config = BertConfig.from_json_file(config_file)
+        logger.info("Model config {}".format(config))
+        # set pos config
+        pos_config = copy.deepcopy(config)
+        pos_config.vocab_size = 47
+        pos_config.hidden_size = 12
+        pos_config.intermediate_size = 45  # 180
+        pos_config.num_hidden_layers = 3
+        logger.info("Model config {}".format(pos_config))
+        # Instantiate model.
+        model = cls(config, pos_config, *inputs, **kwargs)
+        weights_path = os.path.join(serialization_dir, WEIGHTS_NAME)
+        if state_dict is None:
+            logger.info("Loading pretrained BERT!")
+            state_dict = torch.load(weights_path)
+
+        missing_keys = []
+        unexpected_keys = []
+        error_msgs = []
+        # copy state_dict so _load_from_state_dict can modify it
+        metadata = getattr(state_dict, '_metadata', None)
+        state_dict = state_dict.copy()
+        if metadata is not None:
+            state_dict._metadata = metadata
+
+        def load(module, prefix=''):
+            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            module._load_from_state_dict(
+                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
+            for name, child in module._modules.items():
+                if 'posbert' in name:
+                    continue
+                if child is not None:
+                    load(child, prefix + name + '.')
+
+        load(model, prefix='' if hasattr(model, 'bert') else 'bert.')
+        total_param = 0
+        for name, param in model.named_parameters():
+            param_size = 1
+            if param.requires_grad:
+                for sz in param.data.shape:
+                    param_size *= sz
+                total_param += param_size
+                print("name: {}, para: {}".format(name, param.data.shape))
+        print('total param: {}'.format(total_param))
+        # exit()
+        if len(missing_keys) > 0:
+            logger.info("Weights of {} not initialized from pretrained model: {}".format(
+                model.__class__.__name__, missing_keys))
+        if len(unexpected_keys) > 0:
+            logger.info("Weights from pretrained model not used in {}: {}".format(
+                model.__class__.__name__, unexpected_keys))
+        if tempdir:
+            # Clean up temp dir
+            shutil.rmtree(tempdir)
+        return model
+
 class BertPOSQuestionAnswering(PreTrainedBertModel):
 
     def __init__(self, config, pos_config):
