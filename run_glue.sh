@@ -26,5 +26,5 @@ python ./$RUN_FILE \
 		--per_gpu_train_batch_size=8   \
 		--learning_rate 2e-5 \
 		--num_train_epochs $NUM_EPOCHS \
-		--output_dir ../GLUE_models/$MODEL/$TASK_NAME/
+		--output_dir ../GLUE_models/$MODEL/$TASK_NAME/ \
         --save_steps 0
