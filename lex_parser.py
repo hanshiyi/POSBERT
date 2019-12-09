@@ -41,8 +41,14 @@ class Lex_parser:
                 sentence = sentence.lower()
 
         sentence = self.basic_tokenizer.tokenize(sentence)
-        tags = self.parser.tag(sentence)
 
+
+        # print("sentence here,", sentence)
+        sentence = list(map(lambda x: x.upper() if x == 'i' else x, sentence))
+        tags = self.parser.tag(sentence)
+        # print("sentence here,", sentence)
+        # print("tags here", tags)
+        # exit(-2)
         if not self.tag_id_initialized:
             for tag in tags:
                 if tag[1] not in self.tag_to_id:

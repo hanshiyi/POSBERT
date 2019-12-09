@@ -197,11 +197,12 @@ class BertTokenizer(object):
                 self.child_id_parent[id] = self.child_parent[token]
 
         if len(ids) > self.max_len:
-            raise ValueError(
-                "Token indices sequence length is longer than the specified maximum "
-                " sequence length for this BERT model ({} > {}). Running this"
-                " sequence through BERT will result in indexing errors".format(len(ids), self.max_len)
-            )
+            # raise ValueError(
+            #     "Token indices sequence length is longer than the specified maximum "
+            #     " sequence length for this BERT model ({} > {}). Running this"
+            #     " sequence through BERT will result in indexing errors".format(len(ids), self.max_len)
+            # )
+            return ids[:self.max_len]
         return ids
 
     def convert_ids_to_tokens(self, ids):
@@ -224,6 +225,8 @@ class BertTokenizer(object):
         ids = []
         for i in token_ids:
             word_parent = self.child_id_parent.get(i, None)
+            if word_parent == 'i':
+                word_parent = 'I'
             if word_parent is None:
                 raise Exception("cannot find the origin token of token_id {0}".format(i))
             # print("parent tags:", len(parent_tags), len(token_ids))
@@ -424,8 +427,21 @@ class BertTokenizer(object):
                     "Input is not valid. Should be a string, a list/tuple of strings or a list/tuple of integers.")
 
         first_ids = get_input_ids(text)
+
         parsed_words1 = dict(parser.convert_sentence_to_tags(text))
+        # print("tag_id_dicts:", parser.tag_to_id)
+
         first_tag_ids = self.convert_token_ids_to_tag_ids(first_ids, parsed_words1, parser.tag_to_id)
+        # print("sentence:", text)
+        # print("subwords:", self.tokenize(text))
+        # print("first_tag_ids:", first_tag_ids)
+        # print("tag_id_dicts:", parser.tag_to_id)
+        # print("first_ids:", first_ids)
+        # print("parsed_words", parsed_words1)
+        #
+        #
+        #
+        # exit(-1)
 
         second_ids = get_input_ids(text_pair) if text_pair is not None else None
         second_tag_ids = None

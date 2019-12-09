@@ -853,8 +853,8 @@ def run_glue():
         features_dataset = load_and_cache_examples_features_tags(args, args.task_name, tokenizer, lex_parser, evaluate=False)
         # TODO: please uncomment this.
         global_step, tr_loss = train(args, features_dataset, model, tokenizer)
-        # logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-        print("get training dataset")
+        logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+        # print("get training dataset")
 
     # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
     if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):

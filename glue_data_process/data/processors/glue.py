@@ -17,7 +17,7 @@
 
 import logging
 import os
-
+import tqdm
 from .utils import DataProcessor, InputExample, InputFeatures, InputTags
 from ...file_utils import is_tf_available
 
@@ -206,7 +206,7 @@ def glue_convert_examples_to_features_tags(examples, tokenizer, parser,
     tags = []
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
-            logger.info("Writing example %d" % (ex_index))
+            logger.warning("Writing example %d" % (ex_index))
         if is_tf_dataset:
             example = processor.get_example_from_tensor_dict(example)
             example = processor.tfds_map(example)
