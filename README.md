@@ -1,4 +1,24 @@
 # EnBert
+
+# run squad step by step
+
+1. clone the repo
+2. download the stanford nlp parser:
+
+```cd Enbert/```
+
+```wget http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip```
+
+```unzip stanford-corenlp-full-2018-10-05.zip```
+
+```cd stanford-corenlp-full-2018-10-05```
+
+3. preprocess the data:
+    1. start the lex parser, cd the folder and 
+```java -mx4g -cp "*" edu.stanford.nlp.pipeline.StanfordCoreNLPServer -preload tokenize,ssplit,pos,lemma,ner,parse,depparse -status_port 9000 -port 9000 -timeout 15000 &```
+    2. python squad_data_process.py
+
+
 ## Update(11/18):
 we will use modules in the repo https://github.com/jurekkow/bert-squad-demo to 
 parse squad dataset.
@@ -15,7 +35,7 @@ Then we use the modules in the repo https://github.com/huggingface/transformers 
 the glue dataset.
 
 
-# run the code step by step
+# run glue step by step
 1. clone the repo
 2. download the stanford nlp parser:
 
@@ -34,10 +54,8 @@ the glue dataset.
 4. preprocess the data:
     1. start the lex parser, cd the folder and 
 ```java -mx4g -cp "*" edu.stanford.nlp.pipeline.StanfordCoreNLPServer -preload tokenize,ssplit,pos,lemma,ner,parse,depparse -status_port 9000 -port 9000 -timeout 15000 &```
-  
-    2. process the squad data
     
-    3. process the glue data
+    2. process the glue data
     ```
    python run_glue.py \
     --model_type bert \
