@@ -1,5 +1,21 @@
 # EnBert
 
+
+## Update(11/18):
+we will use modules in the repo https://github.com/jurekkow/bert-squad-demo to 
+parse squad dataset.
+
+Usage: please refer to main() in run_squad.py
+
+## Update(12/4)
+Add glue data, Please use the following command to download glue data,
+
+```python download_glue_data.py --data_dir data/glue --tasks all```
+
+
+Then we use the modules in the repo https://github.com/huggingface/transformers to parse 
+the glue dataset.
+
 # run squad step by step
 
 1. clone the repo
@@ -18,21 +34,6 @@
 ```java -mx4g -cp "*" edu.stanford.nlp.pipeline.StanfordCoreNLPServer -preload tokenize,ssplit,pos,lemma,ner,parse,depparse -status_port 9000 -port 9000 -timeout 15000 &```
     2. python squad_data_process.py
 
-
-## Update(11/18):
-we will use modules in the repo https://github.com/jurekkow/bert-squad-demo to 
-parse squad dataset.
-
-Usage: please refer to main() in run_squad.py
-
-## Update(12/4)
-Add glue data, Please use the following command to download glue data,
-
-```python download_glue_data.py --data_dir data/glue --tasks all```
-
-
-Then we use the modules in the repo https://github.com/huggingface/transformers to parse 
-the glue dataset.
 
 
 # run glue step by step
