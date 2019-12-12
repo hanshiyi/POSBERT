@@ -5,7 +5,7 @@ Shiyi Han, Yiming Zhang, Shunjia Zhu
 
 ## Run on SQuAD
 1. Clone the repo
-2. Install the requried package. Use 'pip install <package>'
+2. Install the required package. Use 'pip install <package>'
 3. Download and unzip SQuAD datasets. 
 3. Download the stanford nlp parser:
 
@@ -41,7 +41,7 @@ Shiyi Han, Yiming Zhang, Shunjia Zhu
     python eval.script.py /path/to/data/squad/dev-v2.0.json small_param_model/predictions.json
     ```
 
-Our result:
+## SQuAD result
 
 SQuAD 1.1 results on Dev set
 
@@ -71,11 +71,7 @@ SQuAD 2.0 results on Dev set
     cd stanford-corenlp-full-2018-10-05
     ```
 
-2. Download GLUE data:
-
-    ```
-    python download_glue_data.py --data_dir ../glue_data --tasks all
-    ```
+2. Download GLUE data
 
 3. Preprocess the data. Start the lex parser.
     ```
@@ -100,3 +96,12 @@ SQuAD 2.0 results on Dev set
     --output_dir temp/MRPC\
     --overwrite_output_dir
     ```
+
+## GLUE result
+
+GLUE results on Dev set
+
+| Model   | CoLA  | SST-2 | MRPC      | STS-B     | MNLI  | RTE   | QQP         | QNLI  |
+|---------|-------|-------|-----------|-----------|-------|-------|-------------|-------|
+| BERT    | 43.62 | 91.28 | 88.3/83.3 | 87.3/86.7 | 81.98 | 64.98 | 85.71/89.24 | 89.38 |
+| POSBERT | 44.44 | 90.82 | 88.8/84.3 | 87.4/86.9 | 83.14 | 66.42 | 86.35/89.73 | 89.98 |
