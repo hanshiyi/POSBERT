@@ -1,6 +1,0 @@
-"training: "
-CUDA_LAUNCH_BLOCKING=1 python run_squad.py --bert_model bert-base-uncased --output_dir /home/shiyi_han/small_param_model/ --do_train --train_file /home/shiyi_han/EnBert/data/squad/train-v2.0.json --version_2_with_negative --fp16
-"testing: "
-CUDA_LAUNCH_BLOCKING=1 python run_squad.py --bert_model bert-base-uncased --output_dir /home/shiyi_han/small_param_model/ --do_predict --predict_file /home/shiyi_han/EnBert/data/squad/dev-v2.0.json --version_2_with_negative --fp16
-"Evaluaiton: "
-python eval.script.py EnBert/data/squad/dev-v2.0.json small_param_model/predictions.json

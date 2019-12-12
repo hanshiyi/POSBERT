@@ -8,46 +8,75 @@ Shiyi Han, Yiming Zhang, Shunjia Zhu
 2. Install the requried package. Use 'pip install <package>'
 2. Download the stanford nlp parser:
 
-```cd Enbert/```
+```cd POSBert/
 
-```wget http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip --no-check-certificate```
+wget http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip --no-check-certificate
 
-```unzip stanford-corenlp-full-2018-10-05.zip```
+unzip stanford-corenlp-full-2018-10-05.zip
 
-```cd stanford-corenlp-full-2018-10-05```
+cd stanford-corenlp-full-2018-10-05
+```
 
 3. Preprocess the data:
     1. Start the lex parser, cd the folder and 
-```java -mx4g -cp "*" edu.stanford.nlp.pipeline.StanfordCoreNLPServer -preload tokenize,ssplit,pos,lemma,ner,parse,depparse -status_port 9000 -port 9000 -timeout 15000 &```
+```
+java -mx4g -cp "*" edu.stanford.nlp.pipeline.StanfordCoreNLPServer -preload tokenize,ssplit,pos,lemma,ner,parse,depparse -status_port 9000 -port 9000 -timeout 15000 &
+```
     2. python squad_data_process.py
 
 4. Execute run_squad.py
 Testing:
 
-```python run_squad.py --bert_model bert-base-uncased --output_dir /path/to/small_param_model/ --do_predict --predict_file /path/to/EnBert/data/squad/dev-v2.0.json --version_2_with_negative --fp16```
+```
+python run_squad.py --bert_model bert-base-uncased --output_dir /path/to/small_param_model/ --do_predict --predict_file /path/to/POSBert/data/squad/dev-v2.0.json --version_2_with_negative --fp16
+```
 
 Evaluaiton: 
 
-```python eval.script.py EnBert/data/squad/dev-v2.0.json small_param_model/predictions.json```
+```
+python eval.script.py POSBert/data/squad/dev-v2.0.json small_param_model/predictions.json
+```
 
 # Run on GLUE
 1. Download the stanford nlp parser:
 
-```cd Enbert/```
+```
+cd POSBert/
 
-```wget http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip```
+wget http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip
 
-```unzip stanford-corenlp-full-2018-10-05.zip```
+unzip stanford-corenlp-full-2018-10-05.zip
 
-```cd stanford-corenlp-full-2018-10-05```
+cd stanford-corenlp-full-2018-10-05
+```
 
 2. Download the glue data:
 
-```python download_glue_data.py --data_dir ../glue_data --tasks all```
+```
+python download_glue_data.py --data_dir ../glue_data --tasks all
+```
 
 3. Preprocess the data:
     1. start the lex parser, cd the folder and 
-```java -mx4g -cp "*" edu.stanford.nlp.pipeline.StanfordCoreNLPServer -preload tokenize,ssplit,pos,lemma,ner,parse,depparse -status_port 9000 -port 9000 -timeout 15000 &```
+```
+java -mx4g -cp "*" edu.stanford.nlp.pipeline.StanfordCoreNLPServer -preload tokenize,ssplit,pos,lemma,ner,parse,depparse -status_port 9000 -port 9000 -timeout 15000 &
+```
     
 4. Execute run_glue.py and specify the task
-```sh run_glue.sh MRPC POS```
+```
+python run_glue.py \
+--model_type bert \
+--model_name_or_path bert-base-uncased \
+--task_name MRPC \
+--do_train \
+--do_eval \
+--do_lower_case \
+--data_dir data/glue/MRPC \
+--max_seq_length 128 \
+--per_gpu_eval_batch_size=8   \
+--per_gpu_train_batch_size=8   \
+--learning_rate 2e-5 \
+--num_train_epochs 3.0 \
+--output_dir temp/MRPC\
+--overwrite_output_dir
+```
