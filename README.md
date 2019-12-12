@@ -8,7 +8,7 @@ Shiyi Han, Yiming Zhang, Shunjia Zhu
 2. Install the requried package. Use 'pip install <package>'
 2. Download the stanford nlp parser:
 
-```cd POSBert/
+```cd POSBERT/
 
 wget http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip --no-check-certificate
 
@@ -28,20 +28,20 @@ java -mx4g -cp "*" edu.stanford.nlp.pipeline.StanfordCoreNLPServer -preload toke
 Testing:
 
 ```
-python run_squad.py --bert_model bert-base-uncased --output_dir /path/to/small_param_model/ --do_predict --predict_file /path/to/POSBert/data/squad/dev-v2.0.json --version_2_with_negative --fp16
+python run_squad.py --bert_model bert-base-uncased --output_dir /path/to/small_param_model/ --do_predict --predict_file /path/to/POSBERT/data/squad/dev-v2.0.json --version_2_with_negative --fp16
 ```
 
 Evaluaiton: 
 
 ```
-python eval.script.py POSBert/data/squad/dev-v2.0.json small_param_model/predictions.json
+python eval.script.py POSBERT/data/squad/dev-v2.0.json small_param_model/predictions.json
 ```
 
 # Run on GLUE
 1. Download the stanford nlp parser:
 
 ```
-cd POSBert/
+cd POSBERT/
 
 wget http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip
 

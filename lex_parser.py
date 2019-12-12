@@ -7,7 +7,7 @@ from bert_tokenization import BasicTokenizer
 # If you want to parse the id
 
 # open terminal and
-# cd POSbert/
+# cd POSBERT/
 # wget http://nlp.stanford.edu/software/stanford-corenlp-full-2018-10-05.zip
 # unzip stanford-corenlp-full-2018-10-05.zip
 # cd stanford-corenlp-full-2018-10-05
